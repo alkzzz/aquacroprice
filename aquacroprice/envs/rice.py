@@ -24,10 +24,9 @@ config = dict(
     soil='Paddy',
     init_wc=InitialWaterContent(depth_layer=[1, 2], value=['FC', 'FC']),
     planting_date='08/01',
-    days_to_irr=3,
+    days_to_irr=1,
     max_irr=25,
     action_set='depth',
-    normalize_obs=True,
 )
 
 # Define the Rice environment class
@@ -43,7 +42,6 @@ class Rice(gym.Env):
         self.max_irr = config['max_irr']
         self.init_wc = config["init_wc"]
         self.action_set = config["action_set"]
-        self.normalize_obs = config["normalize_obs"]
         
         soil = config['soil']
         if isinstance(soil, str):
@@ -53,13 +51,11 @@ class Rice(gym.Env):
             self.soil = soil
 
         # Define observation space
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(19,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(6,), dtype=np.float32)
         
         # Define discrete action space for irrigation depth
         self.action_space = spaces.Discrete(self.max_irr + 1)  # Discrete space from 0 to 25
-        
-        self.mean = 0
-        self.std = 1
+
 
     def reset(self, seed=None, options=None):
         print("Resetting environment...")
@@ -95,6 +91,9 @@ class Rice(gym.Env):
                                 irrigation_management=IrrigationManagement(irrigation_method=5),
                                 initial_water_content=self.init_wc)
         self.model.run_model()
+        
+        self.cumulative_reward = 0.0
+        
         obs = self._get_obs()
         info = dict()
 
@@ -105,30 +104,16 @@ class Rice(gym.Env):
         total_precipitation_last_7_days = self._get_total_precipitation_last_7_days()
         obs = np.array([
             cond.canopy_cover,
-            cond.canopy_cover_adj,
-            cond.canopy_cover_ns,
-            cond.canopy_cover_adj_ns,
             cond.biomass,
-            cond.biomass_ns,
-            cond.YieldPot,
             cond.harvest_index,
-            cond.harvest_index_adj,
-            cond.ccx_act,
-            cond.ccx_act_ns,
-            cond.ccx_w,
-            cond.ccx_w_ns,
-            cond.ccx_early_sen,
-            cond.cc_prev,
             cond.DryYield,
-            cond.FreshYield,
             cond.z_root,
             total_precipitation_last_7_days
         ], dtype=np.float32)
 
-        if self.normalize_obs:
-            return (obs - self.mean) / self.std
-        else:
-            return obs
+        print(f'Obs: ', obs)
+
+        return obs
 
     def _get_total_precipitation_last_7_days(self):
         current_day = self.model._clock_struct.time_step_counter
@@ -137,42 +122,66 @@ class Rice(gym.Env):
         return total_precipitation
 
     def step(self, action):
-        depth = np.clip(action, 0, self.max_irr)  # Action is already an integer within this range
+        depth = np.clip(action, 0, self.max_irr)  # Clip the action to ensure it's within the valid range
         self.model.irrigation_management.depth = depth
         print(f"Applied irrigation depth: {depth}")
         
-        self.model.run_model(initialize_model=False)
+        self.model.run_model(initialize_model=False)  # Run the model for the current timestep
         print(f'Timestep: ', self.model._clock_struct.time_step_counter)
         
         terminated = self.model._clock_struct.model_is_finished
         truncated = False
         next_obs = self._get_obs()
 
+        # Define the weights for rewards
+        intermediate_reward_weight = 0.05  # Lower weight for intermediate rewards
+        final_reward_weight = 20.0  # Higher weight for the final reward based on yield
+
+        # Extract relevant observations
+        biomass = next_obs[1]
+        harvest_index = next_obs[2]
+        canopy_cover = next_obs[0]
+
+        # Calculate intermediate reward based on the current growth stage
+        if self.model._clock_struct.time_step_counter < 50:  # Early to mid-season
+            reward = intermediate_reward_weight * (
+                (biomass * 0.5) + 
+                (canopy_cover * 0.3) + 
+                (harvest_index * 0.2)
+            )
+        else:  # Late season
+            reward = intermediate_reward_weight * (
+                (biomass * 0.7) + 
+                (harvest_index * 0.3)
+            )
+        
+        # Accumulate the intermediate reward
+        self.cumulative_reward += reward
+
+        # Handle episode termination
         if terminated:
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
-            reward = dry_yield
-            print(f'Chosen Year: {self.simcalyear}')
-            print(f'Final Reward: {reward} (Dry Yield: {dry_yield})')
-        else:
-            reward = 0.0
+            final_reward = dry_yield * final_reward_weight  # Emphasize the final yield reward
 
+            # Add a penalty if the dry yield is below a certain threshold (optional)
+            penalty_threshold = 6.5  # Example threshold for low yield
+            if dry_yield < penalty_threshold:
+                penalty = -500.0  # Penalty for low yield
+                self.cumulative_reward += penalty
+                print(f'Applied Penalty: {penalty} due to low yield: {dry_yield}')
+
+            # Add the final reward to the cumulative reward
+            self.cumulative_reward += final_reward
+            reward = self.cumulative_reward  # The final reward is the cumulative reward
+
+            print(f'Final Cumulative Reward: {reward} (Dry Yield: {dry_yield})')
+        
+        # Info dictionary for additional details (optional, can be used for debugging)
         info = dict()
 
+        # Return the next observation, the reward, whether the episode is terminated, and additional info
         return next_obs, reward, terminated, truncated, info
 
-    def get_mean_std(self, num_reps):
-        self.mean = 0
-        self.std = 1
-        obs = []
-        for _ in range(num_reps):
-            self.reset(seed=0)
 
-            done = False
-            while not done:
-                observation, reward, done, _, _ = self.step(np.random.randint(0, 2))  # Randomly choosing 0 or 1 action
-                obs.append(observation)
 
-        obs = np.vstack(obs)
-        self.mean = obs.mean(axis=0)
-        self.std = obs.std(axis=0)
-        self.std[self.std == 0] = 1
+

@@ -81,7 +81,7 @@ model = PPO(
 experiment.log_parameters(ppo_params)
 
 # Train the PPO model
-model.learn(total_timesteps=100000, callback=reward_logging_callback)
+model.learn(total_timesteps=20000, callback=reward_logging_callback)
 
 # Evaluate the PPO agent using Stable Baselines' `evaluate_policy`
 ppo_mean_reward, ppo_std_reward = evaluate_policy(model, env, n_eval_episodes=10, return_episode_rewards=False)
