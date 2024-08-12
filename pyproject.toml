@@ -13,6 +13,7 @@ stable-baselines3 = {extras = ["extra"], version = "^2.3.2"}
 comet-ml = "^3.44.3"
 optuna = {git = "https://github.com/optuna/optuna.git", rev = "master"}
 poetry-plugin-export = "^1.8.0"
+sb3-contrib = "^2.3.0"
 
 
 [build-system]

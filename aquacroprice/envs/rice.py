@@ -50,12 +50,11 @@ class Rice(gym.Env):
             assert isinstance(soil, Soil), "soil needs to be 'str' or 'Soil'"
             self.soil = soil
 
-        # Define observation space
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(6,), dtype=np.float32)
+        # Define observation space: Updated to include additional weather-related observations
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(11,), dtype=np.float32)
         
         # Define discrete action space for irrigation depth
         self.action_space = spaces.Discrete(self.max_irr + 1)  # Discrete space from 0 to 25
-
 
     def reset(self, seed=None, options=None):
         print("Resetting environment...")
@@ -64,12 +63,10 @@ class Rice(gym.Env):
         if seed is not None:
             np.random.seed(seed)
 
-        # Corrected line
         sim_year = np.random.randint(self.year1, self.year2 + 1)
         self.simcalyear = sim_year
         print(f"Chosen Year: {self.simcalyear}")
 
-        # Initialize the Crop object with the selected planting date
         crop = config['crop']
         if isinstance(crop, str):
             self.crop = Crop(crop, self.planting_date)
@@ -79,13 +76,11 @@ class Rice(gym.Env):
 
         print(f"Crop Planting Date: {self.crop.planting_date}")
 
-        # Update weather data for the selected year
         self.wdf = prepare_weather('generated_weather_data.txt')
         self.wdf['Year'] = self.simcalyear
 
         self.irr_sched = []
 
-        # Initialize the AquaCrop model for the new simulation year
         self.model = AquaCropModel(f'{self.simcalyear}/{self.planting_date}', 
                                 f'{self.simcalyear}/12/31', self.wdf, self.soil, self.crop,
                                 irrigation_management=IrrigationManagement(irrigation_method=5),
@@ -101,17 +96,30 @@ class Rice(gym.Env):
 
     def _get_obs(self):
         cond = self.model._init_cond
+        current_day = self.model._clock_struct.time_step_counter
+
         total_precipitation_last_7_days = self._get_total_precipitation_last_7_days()
+        cum_min_temp_last_7_days = self._get_cumulative_temp_last_7_days("MinTemp")
+        cum_max_temp_last_7_days = self._get_cumulative_temp_last_7_days("MaxTemp")
+        prev_day_min_temp = self._get_previous_day_value("MinTemp")
+        prev_day_max_temp = self._get_previous_day_value("MaxTemp")
+        prev_day_precipitation = self._get_previous_day_value("Precipitation")
+
         obs = np.array([
             cond.canopy_cover,
             cond.biomass,
             cond.harvest_index,
             cond.DryYield,
             cond.z_root,
-            total_precipitation_last_7_days
+            total_precipitation_last_7_days,
+            cum_min_temp_last_7_days,
+            cum_max_temp_last_7_days,
+            prev_day_min_temp,
+            prev_day_max_temp,
+            prev_day_precipitation,
         ], dtype=np.float32)
 
-        print(f'Obs: ', obs)
+        print(f'Obs: {obs}')
 
         return obs
 
@@ -121,67 +129,40 @@ class Rice(gym.Env):
         total_precipitation = last_7_days['Precipitation'].sum()
         return total_precipitation
 
+    def _get_cumulative_temp_last_7_days(self, temp_col):
+        current_day = self.model._clock_struct.time_step_counter
+        last_7_days = self.wdf.iloc[max(0, current_day - 7):current_day]
+        cumulative_temp = last_7_days[temp_col].sum()
+        return cumulative_temp
+
+    def _get_previous_day_value(self, col):
+        current_day = self.model._clock_struct.time_step_counter
+        if current_day > 0:
+            prev_day_value = self.wdf.iloc[current_day - 1][col]
+        else:
+            prev_day_value = 0.0  # If it's the first day, there's no previous day data
+        return prev_day_value
+
     def step(self, action):
-        depth = np.clip(action, 0, self.max_irr)  # Clip the action to ensure it's within the valid range
+        depth = np.clip(action, 0, self.max_irr)
         self.model.irrigation_management.depth = depth
         print(f"Applied irrigation depth: {depth}")
         
-        self.model.run_model(initialize_model=False)  # Run the model for the current timestep
-        print(f'Timestep: ', self.model._clock_struct.time_step_counter)
+        self.model.run_model(initialize_model=False)
+        print(f'Timestep: {self.model._clock_struct.time_step_counter}')
         
         terminated = self.model._clock_struct.model_is_finished
         truncated = False
         next_obs = self._get_obs()
-
-        # Define the weights for rewards
-        intermediate_reward_weight = 0.05  # Lower weight for intermediate rewards
-        final_reward_weight = 20.0  # Higher weight for the final reward based on yield
-
-        # Extract relevant observations
-        biomass = next_obs[1]
-        harvest_index = next_obs[2]
-        canopy_cover = next_obs[0]
-
-        # Calculate intermediate reward based on the current growth stage
-        if self.model._clock_struct.time_step_counter < 50:  # Early to mid-season
-            reward = intermediate_reward_weight * (
-                (biomass * 0.5) + 
-                (canopy_cover * 0.3) + 
-                (harvest_index * 0.2)
-            )
-        else:  # Late season
-            reward = intermediate_reward_weight * (
-                (biomass * 0.7) + 
-                (harvest_index * 0.3)
-            )
         
-        # Accumulate the intermediate reward
-        self.cumulative_reward += reward
+        reward = 0.0  # Default reward during the episode
 
-        # Handle episode termination
         if terminated:
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
-            final_reward = dry_yield * final_reward_weight  # Emphasize the final yield reward
+            reward = dry_yield
 
-            # Add a penalty if the dry yield is below a certain threshold (optional)
-            penalty_threshold = 6.5  # Example threshold for low yield
-            if dry_yield < penalty_threshold:
-                penalty = -500.0  # Penalty for low yield
-                self.cumulative_reward += penalty
-                print(f'Applied Penalty: {penalty} due to low yield: {dry_yield}')
-
-            # Add the final reward to the cumulative reward
-            self.cumulative_reward += final_reward
-            reward = self.cumulative_reward  # The final reward is the cumulative reward
-
-            print(f'Final Cumulative Reward: {reward} (Dry Yield: {dry_yield})')
+            print(f'Final Reward: {reward} (Dry Yield: {dry_yield})')
         
-        # Info dictionary for additional details (optional, can be used for debugging)
         info = dict()
 
-        # Return the next observation, the reward, whether the episode is terminated, and additional info
         return next_obs, reward, terminated, truncated, info
-
-
-
-

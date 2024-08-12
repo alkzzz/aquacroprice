@@ -1,13 +1,16 @@
-import os
 import numpy as np
 import matplotlib.pyplot as plt
 from comet_ml import OfflineExperiment
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
+from sb3_contrib import TRPO, ARS, QRDQN, MaskablePPO, RecurrentPPO, TQC
 from aquacroprice.envs.rice import Rice
 
+# The rest of your code goes here...
+
+# Custom callback for logging and plotting rewards
 # Custom callback for logging and plotting rewards
 class RewardLoggingCallback(BaseCallback):
     def __init__(self, experiment, verbose=0):
@@ -19,17 +22,21 @@ class RewardLoggingCallback(BaseCallback):
         self.current_timesteps = 0
 
     def _on_step(self) -> bool:
-        # Update cumulative reward and timesteps
-        self.current_rewards += np.mean(self.locals['rewards'])  # Mean reward across environments
-        self.current_timesteps += 1
-        
-        # Check if any environment is done
-        if any(self.locals['dones']):
-            self.episode_rewards.append(self.current_rewards)
-            self.episode_timesteps.append(self.num_timesteps)
-            self.experiment.log_metric("reward", self.current_rewards, step=self.num_timesteps)
-            self.current_rewards = 0
-            self.current_timesteps = 0
+        # Check if 'rewards' key is available in locals()
+        if 'rewards' in self.locals:
+            # Update cumulative reward and timesteps
+            self.current_rewards += np.mean(self.locals['rewards'])  # Mean reward across environments
+            self.current_timesteps += 1
+
+        # Check if 'dones' key is available in locals()
+        if 'dones' in self.locals:
+            # Check if any environment is done
+            if any(self.locals['dones']):
+                self.episode_rewards.append(self.current_rewards)
+                self.episode_timesteps.append(self.num_timesteps)
+                self.experiment.log_metric("reward", self.current_rewards, step=self.num_timesteps)
+                self.current_rewards = 0
+                self.current_timesteps = 0
         
         return True
 
@@ -47,11 +54,12 @@ class RewardLoggingCallback(BaseCallback):
         plt.savefig('reward_plot.png')
         print("Reward plot saved as reward_plot.png")
 
+
 # Initialize Comet.ml experiment in offline mode
 experiment = OfflineExperiment(
     project_name="aqua-gym-rice",
     workspace="alkzzz",
-    offline_directory="/comet_logs"
+    offline_directory="/home/alkaff/phd/aquacroprice/comet_logs"
 )
 
 # Create the environment
@@ -60,91 +68,53 @@ env = DummyVecEnv([lambda: Rice()])
 # Custom reward logging callback
 reward_logging_callback = RewardLoggingCallback(experiment)
 
-# Define PPO hyperparameters
-ppo_params = {
-    "learning_rate": 1e-3,  # Increased learning rate for potential better learning
-    "n_steps": 4096,         # Increased steps per update
-    "batch_size": 128,       # Larger batch size
-    "n_epochs": 20,          # More epochs per update
-    "gamma": 0.98,           # Slightly adjusted discount factor
-    "gae_lambda": 0.9,       # Slightly adjusted GAE lambda
-    "clip_range": 0.3,       # Adjusted clip range
+# Training parameters (shared among algorithms)
+train_timesteps = 10000
+
+# Define algorithms and hyperparameters
+algorithms = {
+    "PPO": PPO("MlpPolicy", env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
+    "DQN": DQN("MlpPolicy", env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
+    "ARS": ARS("MlpPolicy", env, verbose=1, n_delta=32, n_top=16),
+    "QR-DQN": QRDQN("MlpPolicy", env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
+    "RecurrentPPO": RecurrentPPO("MlpLstmPolicy", env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
+    "TRPO": TRPO("MlpPolicy", env, verbose=1, learning_rate=1e-3, n_steps=2048),
 }
 
-# Create the PPO model
-model = PPO(
-    "MlpPolicy", env, verbose=1,
-    **ppo_params
-)
+# Train and evaluate each algorithm
+mean_rewards = []
+std_rewards = []
+agents = []
 
-# Log hyperparameters to Comet.ml
-experiment.log_parameters(ppo_params)
-
-# Train the PPO model
-model.learn(total_timesteps=20000, callback=reward_logging_callback)
-
-# Evaluate the PPO agent using Stable Baselines' `evaluate_policy`
-ppo_mean_reward, ppo_std_reward = evaluate_policy(model, env, n_eval_episodes=10, return_episode_rewards=False)
-
-# Log PPO evaluation results to Comet.ml
-experiment.log_metric("ppo_agent_mean_reward", ppo_mean_reward)
-experiment.log_metric("ppo_agent_std_reward", ppo_std_reward)
-
-# Implement the random agent
-class RandomAgent:
-    def __init__(self, action_space):
-        self.action_space = action_space
-
-    def act(self):
-        return self.action_space.sample()
-
-# Evaluate the random agent
-random_agent = RandomAgent(env.action_space)
-
-# Function to evaluate the random agent
-def evaluate_random_agent(env, agent, n_eval_episodes=10):
-    episode_rewards = []
-    for episode in range(n_eval_episodes):
-        obs = env.reset()  # Only get the observation from reset
-        done = False
-        total_reward = 0
-        while not done:
-            action = agent.act()
-            # Wrap the action in a list to ensure compatibility with DummyVecEnv
-            obs, reward, done, _ = env.step([action])  # Action wrapped in a list
-            total_reward += reward
-        episode_rewards.append(total_reward)
-
-    mean_reward = np.mean(episode_rewards)
-    std_reward = np.std(episode_rewards)
-    return mean_reward, std_reward
-
-
-
-# Run the random agent evaluation
-random_mean_reward, random_std_reward = evaluate_random_agent(env, random_agent, n_eval_episodes=10)
-
-# Log random agent evaluation results to Comet.ml
-experiment.log_metric("random_agent_mean_reward", random_mean_reward)
-experiment.log_metric("random_agent_std_reward", random_std_reward)
+for name, model in algorithms.items():
+    print(f"Training {name}...")
+    model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
+    
+    print(f"Evaluating {name}...")
+    mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10, return_episode_rewards=False)
+    
+    # Log evaluation results to Comet.ml
+    experiment.log_metric(f"{name}_mean_reward", mean_reward)
+    experiment.log_metric(f"{name}_std_reward", std_reward)
+    
+    # Store results for comparison
+    mean_rewards.append(mean_reward)
+    std_rewards.append(std_reward)
+    agents.append(name)
 
 # End Comet.ml experiment
 experiment.end()
 
 # Print final evaluation results
-print(f"PPO Agent - Mean Reward: {ppo_mean_reward}, Std Dev: {ppo_std_reward}")
-print(f"Random Agent - Mean Reward: {random_mean_reward}, Std Dev: {random_std_reward}")
+for i, agent in enumerate(agents):
+    print(f"{agent} - Mean Reward: {mean_rewards[i]}, Std Dev: {std_rewards[i]}")
 
 # Plot comparison of Mean Rewards
-agents = ['PPO Agent', 'Random Agent']
-mean_rewards = [ppo_mean_reward, random_mean_reward]
-std_rewards = [ppo_std_reward, random_std_reward]
-
-plt.figure(figsize=(10, 6))
+plt.figure(figsize=(12, 7))
 plt.bar(agents, mean_rewards, yerr=std_rewards, capsize=10)
 plt.ylabel('Mean Reward')
-plt.title('Comparison of Mean Reward: PPO Agent vs Random Agent')
+plt.title('Comparison of Mean Reward across Algorithms')
 plt.grid(True)
-plt.savefig('agent_comparison.png')
-print("Comparison plot saved as agent_comparison.png")
+plt.savefig('algorithm_comparison.png')
+print("Comparison plot saved as algorithm_comparison.png")
 plt.show()
