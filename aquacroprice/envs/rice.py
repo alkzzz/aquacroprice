@@ -51,10 +51,10 @@ class Rice(gym.Env):
             self.soil = soil
 
         # Define observation space: Updated to include additional weather-related observations
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(11,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float32)
         
-        # Define discrete action space for irrigation depth
-        self.action_space = spaces.Discrete(self.max_irr + 1)  # Discrete space from 0 to 25
+        # Define binary action space: 0 for no irrigation, 1 for maximum irrigation depth
+        self.action_space = spaces.Discrete(2)  # 0 or 1
 
     def reset(self, seed=None, options=None):
         print("Resetting environment...")
@@ -96,7 +96,6 @@ class Rice(gym.Env):
 
     def _get_obs(self):
         cond = self.model._init_cond
-        current_day = self.model._clock_struct.time_step_counter
 
         total_precipitation_last_7_days = self._get_total_precipitation_last_7_days()
         cum_min_temp_last_7_days = self._get_cumulative_temp_last_7_days("MinTemp")
@@ -111,6 +110,8 @@ class Rice(gym.Env):
             cond.harvest_index,
             cond.DryYield,
             cond.z_root,
+            cond.depletion,
+            cond.taw,
             total_precipitation_last_7_days,
             cum_min_temp_last_7_days,
             cum_max_temp_last_7_days,
@@ -144,7 +145,8 @@ class Rice(gym.Env):
         return prev_day_value
 
     def step(self, action):
-        depth = np.clip(action, 0, self.max_irr)
+        # Map the binary action to irrigation depth
+        depth = 0 if action == 0 else self.max_irr
         self.model.irrigation_management.depth = depth
         print(f"Applied irrigation depth: {depth}")
         
@@ -155,13 +157,13 @@ class Rice(gym.Env):
         truncated = False
         next_obs = self._get_obs()
         
-        reward = 0.0  # Default reward during the episode
-
+        reward = 0
+        
         if terminated:
-            dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
-            reward = dry_yield
+            fresh_yield = self.model._outputs.final_stats['Fresh yield (tonne/ha)'].mean()
+            reward = fresh_yield
 
-            print(f'Final Reward: {reward} (Dry Yield: {dry_yield})')
+            print(f'Final Reward: {reward} (Fresh Yield: {fresh_yield})')
         
         info = dict()
 

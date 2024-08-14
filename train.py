@@ -5,12 +5,9 @@ from stable_baselines3 import PPO, DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
-from sb3_contrib import TRPO, ARS, QRDQN, MaskablePPO, RecurrentPPO, TQC
+from sb3_contrib import TRPO, ARS, QRDQN, RecurrentPPO, TQC
 from aquacroprice.envs.rice import Rice
 
-# The rest of your code goes here...
-
-# Custom callback for logging and plotting rewards
 # Custom callback for logging and plotting rewards
 class RewardLoggingCallback(BaseCallback):
     def __init__(self, experiment, verbose=0):
@@ -54,7 +51,6 @@ class RewardLoggingCallback(BaseCallback):
         plt.savefig('reward_plot.png')
         print("Reward plot saved as reward_plot.png")
 
-
 # Initialize Comet.ml experiment in offline mode
 experiment = OfflineExperiment(
     project_name="aqua-gym-rice",
@@ -69,7 +65,7 @@ env = DummyVecEnv([lambda: Rice()])
 reward_logging_callback = RewardLoggingCallback(experiment)
 
 # Training parameters (shared among algorithms)
-train_timesteps = 10000
+train_timesteps = 20000
 
 # Define algorithms and hyperparameters
 algorithms = {
@@ -81,6 +77,18 @@ algorithms = {
     "TRPO": TRPO("MlpPolicy", env, verbose=1, learning_rate=1e-3, n_steps=2048),
 }
 
+# Define the Random Agent
+class RandomAgent:
+    def __init__(self, action_space):
+        self.action_space = action_space
+
+    def predict(self, observation, state=None, episode_start=None, deterministic=False):
+        action = self.action_space.sample()
+        return [action], state  # Return the action as a list
+
+# Initialize the random agent
+random_agent = RandomAgent(env.action_space)
+
 # Train and evaluate each algorithm
 mean_rewards = []
 std_rewards = []
@@ -91,7 +99,7 @@ for name, model in algorithms.items():
     model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
     
     print(f"Evaluating {name}...")
-    mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10, return_episode_rewards=False)
+    mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=1000, return_episode_rewards=False)
     
     # Log evaluation results to Comet.ml
     experiment.log_metric(f"{name}_mean_reward", mean_reward)
@@ -101,6 +109,19 @@ for name, model in algorithms.items():
     mean_rewards.append(mean_reward)
     std_rewards.append(std_reward)
     agents.append(name)
+
+# Evaluate the Random Agent
+print("Evaluating Random Agent...")
+mean_reward, std_reward = evaluate_policy(random_agent, env, n_eval_episodes=10, return_episode_rewards=False)
+
+# Log evaluation results to Comet.ml
+experiment.log_metric(f"RandomAgent_mean_reward", mean_reward)
+experiment.log_metric(f"RandomAgent_std_reward", std_reward)
+
+# Store results for comparison
+mean_rewards.append(mean_reward)
+std_rewards.append(std_reward)
+agents.append("RandomAgent")
 
 # End Comet.ml experiment
 experiment.end()
