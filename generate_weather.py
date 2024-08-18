@@ -3,8 +3,9 @@ import pandas as pd
 from tqdm import tqdm
 
 # Define parameters for the weather data generation
-start_year = 2000
-end_year = 2050
+start_year = 1678
+end_year = 2261  # Maximum allowed end year for Pandas datetime64
+
 min_temp_range = (5, 20)  # Minimum temperature range in degrees Celsius
 max_temp_range = (25, 40)  # Maximum temperature range in degrees Celsius
 precipitation_range = (0, 10)  # Precipitation range in mm
@@ -29,6 +30,14 @@ for year in tqdm(range(start_year, end_year + 1)):
                 days_in_month = 28
 
         for day in range(1, days_in_month + 1):
+            # Ensure we stop before exceeding the maximum valid date
+            if year == 2262 and month == 4 and day > 11:
+                break
+
+            # Ensure we start after the minimum valid date
+            if year == 1677 and month == 9 and day < 21:
+                continue
+
             # Generate random weather data for the day
             min_temp = round(np.random.uniform(*min_temp_range), 1)
             max_temp = round(np.random.uniform(min_temp + 5, max_temp_range[1]), 1)  # Ensure max_temp > min_temp

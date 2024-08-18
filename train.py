@@ -58,23 +58,23 @@ experiment = OfflineExperiment(
     offline_directory="/home/alkaff/phd/aquacroprice/comet_logs"
 )
 
-# Create the environment
-env = DummyVecEnv([lambda: Rice()])
+# Create the environment for training (with penalty)
+train_env = DummyVecEnv([lambda: Rice(mode='train')])
 
 # Custom reward logging callback
 reward_logging_callback = RewardLoggingCallback(experiment)
 
 # Training parameters (shared among algorithms)
-train_timesteps = 20000
+train_timesteps = 10000
 
 # Define algorithms and hyperparameters
 algorithms = {
-    "PPO": PPO("MlpPolicy", env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
-    "DQN": DQN("MlpPolicy", env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
-    "ARS": ARS("MlpPolicy", env, verbose=1, n_delta=32, n_top=16),
-    "QR-DQN": QRDQN("MlpPolicy", env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
-    "RecurrentPPO": RecurrentPPO("MlpLstmPolicy", env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
-    "TRPO": TRPO("MlpPolicy", env, verbose=1, learning_rate=1e-3, n_steps=2048),
+    "PPO": PPO("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
+    "DQN": DQN("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
+    "ARS": ARS("MlpPolicy", train_env, verbose=1, n_delta=32, n_top=16),
+    "QR-DQN": QRDQN("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
+    "RecurrentPPO": RecurrentPPO("MlpLstmPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
+    "TRPO": TRPO("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048),
 }
 
 # Define the Random Agent
@@ -87,7 +87,7 @@ class RandomAgent:
         return [action], state  # Return the action as a list
 
 # Initialize the random agent
-random_agent = RandomAgent(env.action_space)
+random_agent = RandomAgent(train_env.action_space)
 
 # Train and evaluate each algorithm
 mean_rewards = []
@@ -98,8 +98,11 @@ for name, model in algorithms.items():
     print(f"Training {name}...")
     model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
     
+    # Create the environment for evaluation (without penalty)
+    eval_env = DummyVecEnv([lambda: Rice(mode='eval')])
+    
     print(f"Evaluating {name}...")
-    mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=1000, return_episode_rewards=False)
+    mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=1000, return_episode_rewards=False)
     
     # Log evaluation results to Comet.ml
     experiment.log_metric(f"{name}_mean_reward", mean_reward)
@@ -112,7 +115,7 @@ for name, model in algorithms.items():
 
 # Evaluate the Random Agent
 print("Evaluating Random Agent...")
-mean_reward, std_reward = evaluate_policy(random_agent, env, n_eval_episodes=10, return_episode_rewards=False)
+mean_reward, std_reward = evaluate_policy(random_agent, eval_env, n_eval_episodes=1000, return_episode_rewards=False)
 
 # Log evaluation results to Comet.ml
 experiment.log_metric(f"RandomAgent_mean_reward", mean_reward)

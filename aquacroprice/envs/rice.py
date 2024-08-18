@@ -18,20 +18,20 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="DataFrame.fil
 # Configuration dictionary for the environment
 config = dict(
     name='generated_weather_data',
-    year1=2000,
-    year2=2050,
+    year1=1678,
+    year2=2261,
     crop='PaddyRice',
     soil='Paddy',
     init_wc=InitialWaterContent(depth_layer=[1, 2], value=['FC', 'FC']),
     planting_date='08/01',
     days_to_irr=1,
     max_irr=25,
-    action_set='depth',
+    action_set='binary',
 )
 
 # Define the Rice environment class
 class Rice(gym.Env):
-    def __init__(self, render_mode=None):
+    def __init__(self, render_mode=None, mode='train'):
         super(Rice, self).__init__()
         print("Initializing Rice environment...")
         self.render_mode = render_mode
@@ -42,6 +42,7 @@ class Rice(gym.Env):
         self.max_irr = config['max_irr']
         self.init_wc = config["init_wc"]
         self.action_set = config["action_set"]
+        self.mode = mode  # 'train' or 'eval'
         
         soil = config['soil']
         if isinstance(soil, str):
@@ -120,7 +121,7 @@ class Rice(gym.Env):
             prev_day_precipitation,
         ], dtype=np.float32)
 
-        print(f'Obs: {obs}')
+        # print(f'Obs: {obs}')
 
         return obs
 
@@ -148,10 +149,10 @@ class Rice(gym.Env):
         # Map the binary action to irrigation depth
         depth = 0 if action == 0 else self.max_irr
         self.model.irrigation_management.depth = depth
-        print(f"Applied irrigation depth: {depth}")
+        # print(f"Applied irrigation depth: {depth}")
         
         self.model.run_model(initialize_model=False)
-        print(f'Timestep: {self.model._clock_struct.time_step_counter}')
+        # print(f'Timestep: {self.model._clock_struct.time_step_counter}')
         
         terminated = self.model._clock_struct.model_is_finished
         truncated = False
@@ -161,9 +162,17 @@ class Rice(gym.Env):
         
         if terminated:
             fresh_yield = self.model._outputs.final_stats['Fresh yield (tonne/ha)'].mean()
-            reward = fresh_yield
-
-            print(f'Final Reward: {reward} (Fresh Yield: {fresh_yield})')
+            avg_yield = 7.0
+            if self.mode == 'train':
+                if fresh_yield < avg_yield:
+                    reward = fresh_yield - 3.0
+                    print(f'Final Reward with Penalty: {reward} (Fresh Yield: {fresh_yield})')
+                else:
+                    reward = fresh_yield
+                    print(f'Final Reward with No Penalty: {reward} (Fresh Yield: {fresh_yield})')
+            else:
+                reward = fresh_yield
+                print(f'Final Reward: {reward} (Fresh Yield: {fresh_yield})')
         
         info = dict()
 
