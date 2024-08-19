@@ -2,7 +2,6 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import pandas as pd
-import warnings
 from datetime import datetime, timedelta
 from aquacrop.entities.crop import Crop
 from aquacrop.entities.soil import Soil
@@ -10,10 +9,6 @@ from aquacrop.entities.inititalWaterContent import InitialWaterContent
 from aquacrop.entities.irrigationManagement import IrrigationManagement
 from aquacrop.core import AquaCropModel
 from aquacrop.utils import prepare_weather, get_filepath
-
-# Suppress specific warnings
-warnings.filterwarnings("ignore", category=FutureWarning, message="The 'delim_whitespace' keyword in pd.read_csv is deprecated and will be removed in a future version.")
-warnings.filterwarnings("ignore", category=FutureWarning, message="DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.")
 
 # Configuration dictionary for the environment
 config = dict(
@@ -23,7 +18,6 @@ config = dict(
     crop='PaddyRice',
     soil='Paddy',
     init_wc=InitialWaterContent(depth_layer=[1, 2], value=['FC', 'FC']),
-    planting_date='08/01',
     days_to_irr=1,
     max_irr=25,
     action_set='binary',
@@ -35,7 +29,6 @@ class Rice(gym.Env):
         super(Rice, self).__init__()
         print("Initializing Rice environment...")
         self.render_mode = render_mode
-        self.planting_date = config['planting_date']
         self.days_to_irr = config["days_to_irr"]
         self.year1 = config["year1"]
         self.year2 = config["year2"]
@@ -69,6 +62,8 @@ class Rice(gym.Env):
         print(f"Chosen Year: {self.simcalyear}")
 
         crop = config['crop']
+        self.planting_date = self._get_random_planting_date()
+
         if isinstance(crop, str):
             self.crop = Crop(crop, self.planting_date)
         else:
@@ -82,18 +77,35 @@ class Rice(gym.Env):
 
         self.irr_sched = []
 
-        self.model = AquaCropModel(f'{self.simcalyear}/{self.planting_date}', 
-                                f'{self.simcalyear}/12/31', self.wdf, self.soil, self.crop,
-                                irrigation_management=IrrigationManagement(irrigation_method=5),
-                                initial_water_content=self.init_wc)
+        self.model = AquaCropModel(
+            f'{self.simcalyear}/{self.planting_date}', 
+            f'{self.simcalyear}/12/31', 
+            self.wdf, 
+            self.soil, 
+            self.crop,
+            irrigation_management=IrrigationManagement(irrigation_method=5),
+            initial_water_content=self.init_wc
+        )
+
         self.model.run_model()
-        
+
         self.cumulative_reward = 0.0
         
         obs = self._get_obs()
         info = dict()
 
         return obs, info
+
+    def _get_random_planting_date(self):
+        # Generate a random planting date between January 1 and August 1
+        start_date = datetime.strptime("01/01", "%m/%d")
+        end_date = datetime.strptime("08/01", "%m/%d")
+
+        delta_days = (end_date - start_date).days
+        random_days = np.random.randint(0, delta_days + 1)
+        random_date = start_date + timedelta(days=random_days)
+
+        return random_date.strftime("%m/%d")
 
     def _get_obs(self):
         cond = self.model._init_cond
@@ -121,8 +133,6 @@ class Rice(gym.Env):
             prev_day_precipitation,
         ], dtype=np.float32)
 
-        # print(f'Obs: {obs}')
-
         return obs
 
     def _get_total_precipitation_last_7_days(self):
@@ -149,31 +159,56 @@ class Rice(gym.Env):
         # Map the binary action to irrigation depth
         depth = 0 if action == 0 else self.max_irr
         self.model.irrigation_management.depth = depth
-        # print(f"Applied irrigation depth: {depth}")
         
+        # Run the model for the current step
         self.model.run_model(initialize_model=False)
-        # print(f'Timestep: {self.model._clock_struct.time_step_counter}')
         
         terminated = self.model._clock_struct.model_is_finished
         truncated = False
         next_obs = self._get_obs()
         
+        # Initialize reward
         reward = 0
         
+        # Access current timestep, biomass, and canopy cover values
+        current_timestep = self.model._clock_struct.time_step_counter
+        biomass = self.model._init_cond.biomass
+        canopy_cover = self.model._init_cond.canopy_cover
+
+        # Print biomass, canopy cover, and the action taken for each step
+        # print(f"Step {current_timestep}: Biomass = {biomass}, Canopy Cover = {canopy_cover}, Action Taken = {action}")
+
+        # Normalize biomass to a similar scale as the fresh yield
+        normalized_biomass = biomass / 1000.0
+
+        # Give small rewards for biomass and canopy cover until 50 timesteps
+        if current_timestep <= 50:
+            biomass_reward = normalized_biomass * 0.1  # Scaled down biomass reward
+            canopy_cover_reward = canopy_cover * 0.1
+            reward += biomass_reward + canopy_cover_reward
+        else:
+            additional_reward = 0
+            if normalized_biomass > 1:  # Since biomass is normalized, adjust the condition
+                additional_reward += normalized_biomass * 0.05
+            reward += additional_reward
+
+        # Final reward based on fresh yield at the end of the episode
         if terminated:
             fresh_yield = self.model._outputs.final_stats['Fresh yield (tonne/ha)'].mean()
-            avg_yield = 7.0
-            if self.mode == 'train':
-                if fresh_yield < avg_yield:
-                    reward = fresh_yield - 3.0
-                    print(f'Final Reward with Penalty: {reward} (Fresh Yield: {fresh_yield})')
-                else:
-                    reward = fresh_yield
-                    print(f'Final Reward with No Penalty: {reward} (Fresh Yield: {fresh_yield})')
-            else:
-                reward = fresh_yield
-                print(f'Final Reward: {reward} (Fresh Yield: {fresh_yield})')
+            reward += fresh_yield * 10
+            
+            # Apply penalty if yield is below 7
+            if fresh_yield < 7:
+                penalty = -50  # You can adjust this penalty value
+                reward += penalty
+                print(f'Yield Penalty Applied: {penalty}')
+            
+            print(f'Final Reward: {reward} (Fresh Yield: {fresh_yield})')
         
         info = dict()
 
         return next_obs, reward, terminated, truncated, info
+
+
+
+

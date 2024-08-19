@@ -8,6 +8,13 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from sb3_contrib import TRPO, ARS, QRDQN, RecurrentPPO, TQC
 from aquacroprice.envs.rice import Rice
 
+import warnings
+import logging
+
+
+warnings.filterwarnings("ignore", category=FutureWarning)
+logging.basicConfig(level=logging.WARNING)
+
 # Custom callback for logging and plotting rewards
 class RewardLoggingCallback(BaseCallback):
     def __init__(self, experiment, verbose=0):
@@ -65,16 +72,16 @@ train_env = DummyVecEnv([lambda: Rice(mode='train')])
 reward_logging_callback = RewardLoggingCallback(experiment)
 
 # Training parameters (shared among algorithms)
-train_timesteps = 10000
+train_timesteps = 20000
 
 # Define algorithms and hyperparameters
 algorithms = {
     "PPO": PPO("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
     "DQN": DQN("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
     "ARS": ARS("MlpPolicy", train_env, verbose=1, n_delta=32, n_top=16),
-    "QR-DQN": QRDQN("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
-    "RecurrentPPO": RecurrentPPO("MlpLstmPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
-    "TRPO": TRPO("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048),
+    # "QR-DQN": QRDQN("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
+    # "RecurrentPPO": RecurrentPPO("MlpLstmPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
+    # "TRPO": TRPO("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048),
 }
 
 # Define the Random Agent
