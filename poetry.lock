@@ -68,14 +68,12 @@ tz = ["backports.zoneinfo"]
 
 [[package]]
 name = "aquacrop"
-version = "3.0.8"
+version = "3.0.9"
 description = "Soil-Crop-Water model based on AquaCrop-OS."
 optional = false
 python-versions = ">=3.7"
-files = [
-    {file = "aquacrop-3.0.8-py3-none-any.whl", hash = "sha256:2cb628fda51aea49700eb5f9152609cea447fc89e0863005ab3fbce96631759b"},
-    {file = "aquacrop-3.0.8.tar.gz", hash = "sha256:6f38780a2026b8ac4fb7aa1bc8e5153929ae0b6088a01b2cece3efbc86685481"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 cffi = "1.16.0"
@@ -83,6 +81,12 @@ numba = ">=0.56.0"
 numpy = "1.22.4"
 pandas = ">=1.3.5"
 tqdm = ">=4.64.0"
+
+[package.source]
+type = "git"
+url = "https://github.com/aquacropos/aquacrop.git"
+reference = "HEAD"
+resolved_reference = "7791ba06d8f0dca6b2e40a3631ac9655e1c1987e"
 
 [[package]]
 name = "attrs"
@@ -3676,4 +3680,4 @@ test = ["big-O", "importlib-resources", "jaraco.functools", "jaraco.itertools", 
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "811a429ed7bb8c0d5a0c1d1178bcf443087c15650eb3836cec86f6a9fca4e0cd"
+content-hash = "5682675c77afcedff0a21ee876f7c1fab13e1598c46a3939dd4d0ba457e7600c"

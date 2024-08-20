@@ -3,12 +3,12 @@ from gymnasium import spaces
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+from aquacrop.core import AquaCropModel
 from aquacrop.entities.crop import Crop
-from aquacrop.entities.soil import Soil
 from aquacrop.entities.inititalWaterContent import InitialWaterContent
 from aquacrop.entities.irrigationManagement import IrrigationManagement
-from aquacrop.core import AquaCropModel
-from aquacrop.utils import prepare_weather, get_filepath
+from aquacrop.entities.soil import Soil
+from aquacrop.utils import prepare_weather
 
 # Configuration dictionary for the environment
 config = dict(
@@ -20,7 +20,7 @@ config = dict(
     init_wc=InitialWaterContent(depth_layer=[1, 2], value=['FC', 'FC']),
     days_to_irr=1,
     max_irr=25,
-    action_set='binary',
+    action_set='smt4',  # Action set to 'smt4' for SMT optimization
 )
 
 # Define the Rice environment class
@@ -34,7 +34,6 @@ class Rice(gym.Env):
         self.year2 = config["year2"]
         self.max_irr = config['max_irr']
         self.init_wc = config["init_wc"]
-        self.action_set = config["action_set"]
         self.mode = mode  # 'train' or 'eval'
         
         soil = config['soil']
@@ -44,11 +43,11 @@ class Rice(gym.Env):
             assert isinstance(soil, Soil), "soil needs to be 'str' or 'Soil'"
             self.soil = soil
 
-        # Define observation space: Updated to include additional weather-related observations
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float32)
+        # Define observation space: Includes weather-related observations
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(14,), dtype=np.float32)
         
-        # Define binary action space: 0 for no irrigation, 1 for maximum irrigation depth
-        self.action_space = spaces.Discrete(2)  # 0 or 1
+        # Define action space for SMTs (4 continuous values between -1 and 1)
+        self.action_space = spaces.Box(low=-1., high=1., shape=(4,), dtype=np.float32)
 
     def reset(self, seed=None, options=None):
         print("Resetting environment...")
@@ -77,13 +76,14 @@ class Rice(gym.Env):
 
         self.irr_sched = []
 
+        # Initialize the AquaCrop model with irrigation method 1 (for SMT)
         self.model = AquaCropModel(
             f'{self.simcalyear}/{self.planting_date}', 
             f'{self.simcalyear}/12/31', 
             self.wdf, 
             self.soil, 
             self.crop,
-            irrigation_management=IrrigationManagement(irrigation_method=5),
+            irrigation_management=IrrigationManagement(irrigation_method=1),  # SMT method
             initial_water_content=self.init_wc
         )
 
@@ -118,6 +118,7 @@ class Rice(gym.Env):
         prev_day_precipitation = self._get_previous_day_value("Precipitation")
 
         obs = np.array([
+            cond.age_days,
             cond.canopy_cover,
             cond.biomass,
             cond.harvest_index,
@@ -156,59 +157,52 @@ class Rice(gym.Env):
         return prev_day_value
 
     def step(self, action):
-        # Map the binary action to irrigation depth
-        depth = 0 if action == 0 else self.max_irr
-        self.model.irrigation_management.depth = depth
-        
-        # Run the model for the current step
-        self.model.run_model(initialize_model=False)
-        
+        # Scale the action values to the range [0, 100] for SMTs
+        smts = np.clip((action + 1) * 50, 0, 100)
+        # print(f'SMT: ', smts)
+
+        # Iterate over days until the next irrigation decision
+        for _ in range(self.days_to_irr):
+            # Calculate relative depletion
+            if self.model._init_cond.taw > 0:
+                dep = self.model._init_cond.depletion / self.model._init_cond.taw
+            else:
+                dep = 0
+
+            # Determine growth stage
+            gs = int(self.model._init_cond.growth_stage) - 1
+
+            if 0 <= gs <= 3:
+                if (1 - dep) < (smts[gs] / 100):
+                    depth = np.clip(self.model._init_cond.depletion, 0, self.max_irr)
+                else:
+                    depth = 0
+            else:
+                depth = 0
+
+            self.model.irrigation_management.depth = depth
+            self.irr_sched.append(depth)
+
+            # Simulate one day in the AquaCrop model
+            self.model.run_model(initialize_model=False)
+
+            # Termination conditions
+            if self.model._clock_struct.model_is_finished:
+                break
+
         terminated = self.model._clock_struct.model_is_finished
         truncated = False
         next_obs = self._get_obs()
         
-        # Initialize reward
         reward = 0
         
-        # Access current timestep, biomass, and canopy cover values
-        current_timestep = self.model._clock_struct.time_step_counter
-        biomass = self.model._init_cond.biomass
-        canopy_cover = self.model._init_cond.canopy_cover
-
-        # Print biomass, canopy cover, and the action taken for each step
-        # print(f"Step {current_timestep}: Biomass = {biomass}, Canopy Cover = {canopy_cover}, Action Taken = {action}")
-
-        # Normalize biomass to a similar scale as the fresh yield
-        normalized_biomass = biomass / 1000.0
-
-        # Give small rewards for biomass and canopy cover until 50 timesteps
-        if current_timestep <= 50:
-            biomass_reward = normalized_biomass * 0.1  # Scaled down biomass reward
-            canopy_cover_reward = canopy_cover * 0.1
-            reward += biomass_reward + canopy_cover_reward
-        else:
-            additional_reward = 0
-            if normalized_biomass > 1:  # Since biomass is normalized, adjust the condition
-                additional_reward += normalized_biomass * 0.05
-            reward += additional_reward
-
-        # Final reward based on fresh yield at the end of the episode
+        # Check if the episode has terminated
         if terminated:
-            fresh_yield = self.model._outputs.final_stats['Fresh yield (tonne/ha)'].mean()
-            reward += fresh_yield * 10
-            
-            # Apply penalty if yield is below 7
-            if fresh_yield < 7:
-                penalty = -50  # You can adjust this penalty value
-                reward += penalty
-                print(f'Yield Penalty Applied: {penalty}')
-            
-            print(f'Final Reward: {reward} (Fresh Yield: {fresh_yield})')
+            reward = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
+            if self.mode == 'train':
+                reward *= 1000  # Scale reward by 1000 during training
+            print(f'Final Reward: {reward}')
         
         info = dict()
 
         return next_obs, reward, terminated, truncated, info
-
-
-
-

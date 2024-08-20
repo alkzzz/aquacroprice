@@ -1,16 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from comet_ml import OfflineExperiment
-from stable_baselines3 import PPO, DQN
+from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
-from sb3_contrib import TRPO, ARS, QRDQN, RecurrentPPO, TQC
+from sb3_contrib import TRPO, ARS, RecurrentPPO
 from aquacroprice.envs.rice import Rice
 
 import warnings
 import logging
-
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(level=logging.WARNING)
@@ -26,15 +25,11 @@ class RewardLoggingCallback(BaseCallback):
         self.current_timesteps = 0
 
     def _on_step(self) -> bool:
-        # Check if 'rewards' key is available in locals()
         if 'rewards' in self.locals:
-            # Update cumulative reward and timesteps
             self.current_rewards += np.mean(self.locals['rewards'])  # Mean reward across environments
             self.current_timesteps += 1
 
-        # Check if 'dones' key is available in locals()
         if 'dones' in self.locals:
-            # Check if any environment is done
             if any(self.locals['dones']):
                 self.episode_rewards.append(self.current_rewards)
                 self.episode_timesteps.append(self.num_timesteps)
@@ -48,13 +43,11 @@ class RewardLoggingCallback(BaseCallback):
         self.plot_rewards()
 
     def plot_rewards(self):
-        # Plot the rewards
         plt.figure(figsize=(10, 5))
         plt.plot(self.episode_timesteps, self.episode_rewards)
         plt.xlabel('Timesteps')
         plt.ylabel('Total Reward')
         plt.title('Total Reward per Episode')
-        # Save the plot as an image file
         plt.savefig('reward_plot.png')
         print("Reward plot saved as reward_plot.png")
 
@@ -65,7 +58,7 @@ experiment = OfflineExperiment(
     offline_directory="/home/alkaff/phd/aquacroprice/comet_logs"
 )
 
-# Create the environment for training (with penalty)
+# Create the environment for training (reward scaling applied)
 train_env = DummyVecEnv([lambda: Rice(mode='train')])
 
 # Custom reward logging callback
@@ -77,11 +70,8 @@ train_timesteps = 20000
 # Define algorithms and hyperparameters
 algorithms = {
     "PPO": PPO("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
-    "DQN": DQN("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
     "ARS": ARS("MlpPolicy", train_env, verbose=1, n_delta=32, n_top=16),
-    # "QR-DQN": QRDQN("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, buffer_size=10000, batch_size=32),
-    # "RecurrentPPO": RecurrentPPO("MlpLstmPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
-    # "TRPO": TRPO("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048),
+    "RecurrentPPO": RecurrentPPO("MlpLstmPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
 }
 
 # Define the Random Agent
@@ -105,7 +95,7 @@ for name, model in algorithms.items():
     print(f"Training {name}...")
     model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
     
-    # Create the environment for evaluation (without penalty)
+    # Create the environment for evaluation (no reward scaling)
     eval_env = DummyVecEnv([lambda: Rice(mode='eval')])
     
     print(f"Evaluating {name}...")

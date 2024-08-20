@@ -7,7 +7,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-aquacrop = "^3.0.8"
+aquacrop = {git = "https://github.com/aquacropos/aquacrop.git"}
 gymnasium = "^0.29.1"
 stable-baselines3 = {extras = ["extra"], version = "^2.3.2"}
 comet-ml = "^3.44.3"
