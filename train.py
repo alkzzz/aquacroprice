@@ -5,7 +5,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
-from sb3_contrib import TRPO, ARS, RecurrentPPO
+from sb3_contrib import ARS, RecurrentPPO
 from aquacroprice.envs.rice import Rice
 
 import warnings
@@ -58,8 +58,8 @@ experiment = OfflineExperiment(
     offline_directory="/home/alkaff/phd/aquacroprice/comet_logs"
 )
 
-# Create the environment for training (reward scaling applied)
-train_env = DummyVecEnv([lambda: Rice(mode='train')])
+# Create the environment for training (years 1678-2159)
+train_env = DummyVecEnv([lambda: Rice(mode='train', year1=1678, year2=2159)])
 
 # Custom reward logging callback
 reward_logging_callback = RewardLoggingCallback(experiment)
@@ -95,8 +95,8 @@ for name, model in algorithms.items():
     print(f"Training {name}...")
     model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
     
-    # Create the environment for evaluation (no reward scaling)
-    eval_env = DummyVecEnv([lambda: Rice(mode='eval')])
+    # Create the environment for evaluation (years 2160-2260)
+    eval_env = DummyVecEnv([lambda: Rice(mode='eval', year1=2160, year2=2260)])
     
     print(f"Evaluating {name}...")
     mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=1000, return_episode_rewards=False)

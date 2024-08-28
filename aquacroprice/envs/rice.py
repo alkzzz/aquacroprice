@@ -8,13 +8,13 @@ from aquacrop.entities.crop import Crop
 from aquacrop.entities.inititalWaterContent import InitialWaterContent
 from aquacrop.entities.irrigationManagement import IrrigationManagement
 from aquacrop.entities.soil import Soil
-from aquacrop.utils import prepare_weather
+from aquacrop.utils import prepare_weather, get_filepath
 
 # Configuration dictionary for the environment
 config = dict(
-    name='generated_weather_data',
+    climate='generated_weather_data.txt',
     year1=1678,
-    year2=2261,
+    year2=2159,
     crop='PaddyRice',
     soil='Paddy',
     init_wc=InitialWaterContent(depth_layer=[1, 2], value=['FC', 'FC']),
@@ -25,15 +25,19 @@ config = dict(
 
 # Define the Rice environment class
 class Rice(gym.Env):
-    def __init__(self, render_mode=None, mode='train'):
+    def __init__(self, render_mode=None, mode='train', year1=None, year2=None):
         super(Rice, self).__init__()
         print("Initializing Rice environment...")
         self.render_mode = render_mode
         self.days_to_irr = config["days_to_irr"]
-        self.year1 = config["year1"]
-        self.year2 = config["year2"]
+
+        # If year1 and year2 are provided, override the default config
+        self.year1 = year1 if year1 is not None else config["year1"]
+        self.year2 = year2 if year2 is not None else config["year2"]
+
         self.max_irr = config['max_irr']
         self.init_wc = config["init_wc"]
+        self.climate = config['climate']
         self.mode = mode  # 'train' or 'eval'
         
         soil = config['soil']
@@ -62,6 +66,7 @@ class Rice(gym.Env):
 
         crop = config['crop']
         self.planting_date = self._get_random_planting_date()
+        # self.planting_date = '08/01'
 
         if isinstance(crop, str):
             self.crop = Crop(crop, self.planting_date)
@@ -71,7 +76,7 @@ class Rice(gym.Env):
 
         print(f"Crop Planting Date: {self.crop.planting_date}")
 
-        self.wdf = prepare_weather('generated_weather_data.txt')
+        self.wdf = prepare_weather(self.climate)
         self.wdf['Year'] = self.simcalyear
 
         self.irr_sched = []
@@ -159,7 +164,6 @@ class Rice(gym.Env):
     def step(self, action):
         # Scale the action values to the range [0, 100] for SMTs
         smts = np.clip((action + 1) * 50, 0, 100)
-        # print(f'SMT: ', smts)
 
         # Iterate over days until the next irrigation decision
         for _ in range(self.days_to_irr):
@@ -198,10 +202,16 @@ class Rice(gym.Env):
         
         # Check if the episode has terminated
         if terminated:
-            reward = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
-            if self.mode == 'train':
-                reward *= 1000  # Scale reward by 1000 during training
-            print(f'Final Reward: {reward}')
+            dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
+            total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
+
+            # Example reward function: Maximize yield, minimize water use
+            reward = dry_yield * 100 - total_irrigation
+
+            # You can adjust the coefficients to balance the importance of yield vs. irrigation
+            print(f"Dry Yield: {dry_yield}")
+            print(f"Total Irrigation: {total_irrigation}")
+            print(f"Final Reward: {reward}")
         
         info = dict()
 
