@@ -23,11 +23,16 @@ class RewardLoggingCallback(BaseCallback):
         self.episode_timesteps = []
         self.current_rewards = 0
         self.current_timesteps = 0
+        self.rewards_over_time = []  # New: Track rewards over time
+        self.timesteps_over_time = []  # New: Track timesteps over time
 
     def _on_step(self) -> bool:
         if 'rewards' in self.locals:
-            self.current_rewards += np.mean(self.locals['rewards'])  # Mean reward across environments
+            mean_reward = np.mean(self.locals['rewards'])  # Mean reward across environments
+            self.current_rewards += mean_reward
             self.current_timesteps += 1
+            self.rewards_over_time.append(mean_reward)  # New: Append mean reward
+            self.timesteps_over_time.append(self.num_timesteps)  # New: Append timestep
 
         if 'dones' in self.locals:
             if any(self.locals['dones']):
@@ -41,6 +46,7 @@ class RewardLoggingCallback(BaseCallback):
 
     def _on_training_end(self):
         self.plot_rewards()
+        self.plot_rewards_over_time()  # New: Plot rewards over time
 
     def plot_rewards(self):
         plt.figure(figsize=(10, 5))
@@ -50,6 +56,16 @@ class RewardLoggingCallback(BaseCallback):
         plt.title('Total Reward per Episode')
         plt.savefig('reward_plot.png')
         print("Reward plot saved as reward_plot.png")
+
+    def plot_rewards_over_time(self):  # New: Method to plot rewards over time
+        plt.figure(figsize=(10, 5))
+        plt.plot(self.timesteps_over_time, self.rewards_over_time, alpha=0.6, label="Reward over Time")
+        plt.xlabel('Timesteps')
+        plt.ylabel('Mean Reward')
+        plt.title('Reward Over Time')
+        plt.legend()
+        plt.savefig('reward_over_time_plot.png')
+        print("Reward over time plot saved as reward_over_time_plot.png")
 
 # Initialize Comet.ml experiment in offline mode
 experiment = OfflineExperiment(
