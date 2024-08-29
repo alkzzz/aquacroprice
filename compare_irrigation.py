@@ -19,9 +19,9 @@ sim_end = '2010/12/31'
 
 
 
-soil= Soil('Paddy')
+soil= Soil('SandyLoam')
 
-crop = Crop('localpaddy',planting_date='08/01')
+crop = Crop('Maize',planting_date='05/01')
 
 initWC = InitialWaterContent(value=['FC'])
 

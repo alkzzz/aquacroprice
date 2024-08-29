@@ -12,15 +12,13 @@ from aquacrop.utils import prepare_weather, get_filepath
 
 # Configuration dictionary for the environment
 config = dict(
-    climate='generated_weather_data.txt',
-    year1=1678,
-    year2=2159,
-    crop='PaddyRice',
-    soil='Paddy',
-    init_wc=InitialWaterContent(depth_layer=[1, 2], value=['FC', 'FC']),
-    days_to_irr=1,
-    max_irr=25,
-    action_set='smt4',  # Action set to 'smt4' for SMT optimization
+    climate='champion_climate.txt',
+    year1=1982,
+    year2=2018,
+    crop='Maize',
+    soil='SandyLoam',
+    init_wc=InitialWaterContent(value=['FC']),
+    days_to_irr=7,
 )
 
 # Define the Rice environment class
@@ -35,9 +33,9 @@ class Rice(gym.Env):
         self.year1 = year1 if year1 is not None else config["year1"]
         self.year2 = year2 if year2 is not None else config["year2"]
 
-        self.max_irr = config['max_irr']
         self.init_wc = config["init_wc"]
         self.climate = config['climate']
+        self.irrigation_schedule = [] # Store Irrigation Schedule
         self.mode = mode  # 'train' or 'eval'
         
         soil = config['soil']
@@ -50,8 +48,10 @@ class Rice(gym.Env):
         # Define observation space: Includes weather-related observations
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(14,), dtype=np.float32)
         
-        # Define action space for SMTs (4 continuous values between -1 and 1)
-        self.action_space = spaces.Box(low=-1., high=1., shape=(4,), dtype=np.float32)
+        self.action_depths = list(range(0, 26))  # This creates a list from 0 to 25
+        # self.action_depths = [0, 25]
+        self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space with 25 actions
+
 
     def reset(self, seed=None, options=None):
         print("Resetting environment...")
@@ -65,8 +65,8 @@ class Rice(gym.Env):
         print(f"Chosen Year: {self.simcalyear}")
 
         crop = config['crop']
-        self.planting_date = self._get_random_planting_date()
-        # self.planting_date = '08/01'
+        # self.planting_date = self._get_random_planting_date()
+        self.planting_date = '05/01'
 
         if isinstance(crop, str):
             self.crop = Crop(crop, self.planting_date)
@@ -76,7 +76,7 @@ class Rice(gym.Env):
 
         print(f"Crop Planting Date: {self.crop.planting_date}")
 
-        self.wdf = prepare_weather(self.climate)
+        self.wdf = prepare_weather(get_filepath(self.climate))
         self.wdf['Year'] = self.simcalyear
 
         self.irr_sched = []
@@ -88,7 +88,7 @@ class Rice(gym.Env):
             self.wdf, 
             self.soil, 
             self.crop,
-            irrigation_management=IrrigationManagement(irrigation_method=1),  # SMT method
+            irrigation_management=IrrigationManagement(irrigation_method=5),  # SMT method
             initial_water_content=self.init_wc
         )
 
@@ -163,56 +163,41 @@ class Rice(gym.Env):
 
     def step(self, action):
         # Scale the action values to the range [0, 100] for SMTs
-        smts = np.clip((action + 1) * 50, 0, 100)
-
-        # Iterate over days until the next irrigation decision
-        for _ in range(self.days_to_irr):
-            # Calculate relative depletion
-            if self.model._init_cond.taw > 0:
-                dep = self.model._init_cond.depletion / self.model._init_cond.taw
-            else:
-                dep = 0
-
-            # Determine growth stage
-            gs = int(self.model._init_cond.growth_stage) - 1
-
-            if 0 <= gs <= 3:
-                if (1 - dep) < (smts[gs] / 100):
-                    depth = np.clip(self.model._init_cond.depletion, 0, self.max_irr)
-                else:
-                    depth = 0
-            else:
-                depth = 0
-
-            self.model.irrigation_management.depth = depth
-            self.irr_sched.append(depth)
-
-            # Simulate one day in the AquaCrop model
-            self.model.run_model(initialize_model=False)
-
-            # Termination conditions
-            if self.model._clock_struct.model_is_finished:
-                break
-
-        terminated = self.model._clock_struct.model_is_finished
+        depth = self.action_depths[int(action)]
+        self.model._param_struct.IrrMngt.depth = depth
+        self.model.run_model(initialize_model=False)
+        
         truncated = False
         next_obs = self._get_obs()
         
         reward = 0
         
-        # Check if the episode has terminated
+        terminated = self.model._clock_struct.model_is_finished
+        
+        current_timestep = self.model._clock_struct.time_step_counter
+        self.irrigation_schedule.append((current_timestep, action))
+        
         if terminated:
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
 
-            # Example reward function: Maximize yield, minimize water use
-            reward = dry_yield * 100 - total_irrigation
+            # Focus the reward solely on water efficiency
+            if total_irrigation > 0:
+                water_efficiency = dry_yield / total_irrigation
+            else:
+                water_efficiency = 0  # If no water is used, efficiency is zero
 
-            # You can adjust the coefficients to balance the importance of yield vs. irrigation
+            reward = water_efficiency * 1000  # Apply a strong incentive for water efficiency
+
+            # Logging to help debug and understand the reward structure
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")
+            print(f"Water Efficiency: {water_efficiency}")
             print(f"Final Reward: {reward}")
         
         info = dict()
 
         return next_obs, reward, terminated, truncated, info
+
+
+
