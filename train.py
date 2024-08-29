@@ -5,6 +5,7 @@ from stable_baselines3 import PPO, DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.monitor import Monitor
 from sb3_contrib import ARS
 from aquacroprice.envs.rice import Rice
 
@@ -33,22 +34,22 @@ class RewardLoggingCallback(BaseCallback):
         if 'dones' in self.locals and any(self.locals['dones']):
             # Retrieve total irrigation at the end of the episode
             env = self.locals['env'].envs[0]
-            total_irrigation = env.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
+            total_irrigation = env.unwrapped.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
 
             # Log data at the end of the episode
             self.episode_rewards.append(self.current_rewards)
-            self.episode_schedules.append(env.irrigation_schedule)  # Store irrigation schedule
+            self.episode_schedules.append(env.unwrapped.irrigation_schedule)  # Store irrigation schedule
 
             # Check if this episode has the highest reward so far
             if self.current_rewards > self.highest_reward:
                 self.highest_reward = self.current_rewards
-                self.best_schedule = env.irrigation_schedule.copy()  # Store the best schedule
+                self.best_schedule = env.unwrapped.irrigation_schedule.copy()  # Store the best schedule
 
             self.experiment.log_metric("reward", self.current_rewards, step=len(self.episode_rewards))
 
             # Reset counters for the next episode
             self.current_rewards = 0
-            env.irrigation_schedule = []  # Clear schedule for next episode
+            env.unwrapped.irrigation_schedule = []  # Clear schedule for next episode
 
         return True
 
@@ -88,7 +89,7 @@ experiment = OfflineExperiment(
 )
 
 # Create the environment for training
-train_env = DummyVecEnv([lambda: Rice(mode='train', year1=1982, year2=2002)])
+train_env = DummyVecEnv([lambda: Monitor(Rice(mode='train', year1=1982, year2=2002))])
 
 # Custom reward logging callback
 reward_logging_callback = RewardLoggingCallback(experiment)
@@ -125,7 +126,7 @@ for name, model in algorithms.items():
     model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
     
     # Create the environment for evaluation
-    eval_env = DummyVecEnv([lambda: Rice(mode='eval', year1=2003, year2=2018)])
+    eval_env = DummyVecEnv([lambda: Monitor(Rice(mode='eval', year1=2003, year2=2018))])
     
     print(f"Evaluating {name}...")
     mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=1000, return_episode_rewards=False)
