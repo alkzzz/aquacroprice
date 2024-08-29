@@ -181,18 +181,23 @@ class Rice(gym.Env):
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
 
-            # Focus the reward solely on water efficiency
+            # Calculate water efficiency
             if total_irrigation > 0:
                 water_efficiency = dry_yield / total_irrigation
             else:
                 water_efficiency = 0  # If no water is used, efficiency is zero
 
-            reward = water_efficiency * 1000  # Apply a strong incentive for water efficiency
+            # Introduce a penalty for excessive irrigation
+            irrigation_penalty = total_irrigation * 0.01  # Penalty term proportional to total irrigation
+
+            # Adjusted reward structure focusing on water efficiency with an irrigation penalty
+            reward = (water_efficiency * 1000) - irrigation_penalty
 
             # Logging to help debug and understand the reward structure
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")
             print(f"Water Efficiency: {water_efficiency}")
+            print(f"Irrigation Penalty: {irrigation_penalty}")
             print(f"Final Reward: {reward}")
         
         info = dict()
