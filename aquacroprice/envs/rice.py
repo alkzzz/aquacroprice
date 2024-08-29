@@ -181,7 +181,7 @@ class Rice(gym.Env):
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
 
-            reward = (dry_yield * 150) - (total_irrigation * 5)
+            reward = ((dry_yield * 200) - (total_irrigation * 5)) / 10
 
             # Logging to help debug and understand the reward structure
             print(f"Dry Yield: {dry_yield}")
