@@ -49,7 +49,7 @@ class Rice(gym.Env):
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(14,), dtype=np.float32)
         
         # self.action_depths = list(range(0, 26))  # This creates a list from 0 to 25
-        self.action_depths = [0, 15, 30]
+        self.action_depths = [0, 5, 10, 15, 20, 25]
         self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space with 25 actions
 
 

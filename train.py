@@ -9,6 +9,18 @@ from stable_baselines3.common.monitor import Monitor
 from sb3_contrib import ARS
 from aquacroprice.envs.rice import Rice
 
+from pearl.pearl_agent import PearlAgent
+from pearl.action_representation_modules.one_hot_action_representation_module import (
+    OneHotActionTensorRepresentationModule,
+)
+from pearl.policy_learners.sequential_decision_making.deep_q_learning import (
+    DeepQLearning,
+)
+from pearl.replay_buffers.sequential_decision_making.fifo_off_policy_replay_buffer import (
+    FIFOOffPolicyReplayBuffer,
+)
+from pearl.utils.instantiations.environments.gym_environment import GymEnvironment
+
 import warnings
 import logging
 
@@ -123,6 +135,18 @@ algorithms = {
         n_top=16,
         delta_std=0.05  # Higher noise for more exploration
     ),
+    "Pearl": PearlAgent(
+        policy_learner=DeepQLearning(
+            state_dim=train_env.observation_space.shape[0],
+            action_space=train_env.action_space,
+            hidden_dims=[64, 64],
+            training_rounds=20,
+            action_representation_module=OneHotActionTensorRepresentationModule(
+                max_number_actions=train_env.action_space.n
+            ),
+        ),
+        replay_buffer=FIFOOffPolicyReplayBuffer(10_000),
+    )
 }
 
 # Define the Random Agent
@@ -150,7 +174,7 @@ for name, model in algorithms.items():
     eval_env = DummyVecEnv([lambda: Monitor(Rice(mode='eval', year1=2003, year2=2018))])
     
     print(f"Evaluating {name}...")
-    mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=1000, return_episode_rewards=False, deterministic=False)  # Allow exploration during evaluation
+    mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=1000, return_episode_rewards=False, deterministic=False)
     
     # Log evaluation results to Comet.ml
     experiment.log_metric(f"{name}_mean_reward", mean_reward)
