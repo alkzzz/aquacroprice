@@ -97,11 +97,32 @@ reward_logging_callback = RewardLoggingCallback(experiment)
 # Training parameters (shared among algorithms)
 train_timesteps = 20000
 
-# Define algorithms and hyperparameters
+# Define algorithms and hyperparameters with exploration encouragement
 algorithms = {
-    "PPO": PPO("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, n_steps=2048, batch_size=64, n_epochs=10),
-    "DQN": DQN("MlpPolicy", train_env, verbose=1, learning_rate=1e-3, buffer_size=50000, batch_size=64, target_update_interval=500),
-    "ARS": ARS("MlpPolicy", train_env, verbose=1, n_delta=32, n_top=16),
+    "PPO": PPO(
+        "MlpPolicy", train_env, verbose=1,
+        learning_rate=5e-4,  # Lower learning rate for more exploration
+        n_steps=4096,        # More steps before each update to encourage diverse experiences
+        batch_size=64,
+        n_epochs=10,
+        ent_coef=0.01        # Entropy coefficient to maintain exploration
+    ),
+    "DQN": DQN(
+        "MlpPolicy", train_env, verbose=1,
+        learning_rate=1e-3,
+        buffer_size=100000,  # Larger buffer size for more varied experiences
+        batch_size=64,
+        target_update_interval=1000,  # Less frequent updates to encourage exploration
+        exploration_initial_eps=1.0,  # Start with full exploration
+        exploration_final_eps=0.1,    # Maintain some exploration throughout training
+        exploration_fraction=0.2      # Slower decay of exploration rate
+    ),
+    "ARS": ARS(
+        "MlpPolicy", train_env, verbose=1,
+        n_delta=64,  # More perturbations for broader exploration
+        n_top=16,
+        delta_std=0.05  # Higher noise for more exploration
+    ),
 }
 
 # Define the Random Agent
@@ -122,14 +143,14 @@ std_rewards = []
 agents = []
 
 for name, model in algorithms.items():
-    print(f"Training {name}...")
+    print(f"Training {name} with enhanced exploration...")
     model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
     
     # Create the environment for evaluation
     eval_env = DummyVecEnv([lambda: Monitor(Rice(mode='eval', year1=2003, year2=2018))])
     
     print(f"Evaluating {name}...")
-    mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=1000, return_episode_rewards=False)
+    mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=1000, return_episode_rewards=False, deterministic=False)  # Allow exploration during evaluation
     
     # Log evaluation results to Comet.ml
     experiment.log_metric(f"{name}_mean_reward", mean_reward)

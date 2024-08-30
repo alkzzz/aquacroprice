@@ -181,9 +181,13 @@ class Rice(gym.Env):
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
             
-            # Calculate the new reward
-            reward = (dry_yield ** 3) - ((total_irrigation + 1) * 15)
-            
+            if total_irrigation == 0:
+                # Assign a fixed reward if total irrigation is 0
+                reward = -10  # Fixed penalty reward
+            else:
+                # Calculate the normal reward
+                reward = (dry_yield ** 3) - ((total_irrigation + 1) * 15)
+
             # Logging to help debug and understand the reward structure
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")
@@ -192,6 +196,7 @@ class Rice(gym.Env):
         info = dict()
 
         return next_obs, reward, terminated, truncated, info
+
 
 
 
