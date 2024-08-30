@@ -181,29 +181,18 @@ class Rice(gym.Env):
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
             
-            # Define your target yield and alpha
-            target_yield = 14  # Target yield in tonnes/ha
-            alpha = 15  # Penalty coefficient
-
-            # Calculate the base reward
-            base_reward = ((dry_yield * 200) - (total_irrigation * 5)) / 10
-
-            # Calculate the penalty based on how far the yield is from the target
-            penalty = alpha * (target_yield - dry_yield) if dry_yield < target_yield else 0
-
-            # Final reward is the base reward minus any penalty
-            reward = base_reward - penalty
-
+            # Calculate the new reward
+            reward = (dry_yield ** 3) - ((total_irrigation + 1) * 15)
+            
             # Logging to help debug and understand the reward structure
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")
-            print(f"Base Reward: {base_reward}")
-            print(f"Penalty: {penalty}")
             print(f"Final Reward: {reward}")
         
         info = dict()
 
         return next_obs, reward, terminated, truncated, info
+
 
 
 
