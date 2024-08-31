@@ -49,7 +49,7 @@ class Rice(gym.Env):
         # Define observation space: Includes weather-related observations
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(14,), dtype=np.float32)
         
-        self.action_depths = [0, 5, 10, 15, 20, 25]
+        self.action_depths = [0, 25]
         self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space with 6 actions
 
     def reset(self, seed=None, options=None):
@@ -177,19 +177,27 @@ class Rice(gym.Env):
         current_timestep = self.model._clock_struct.time_step_counter
         self.irrigation_schedule.append((current_timestep, depth))  # Log the applied irrigation depth
         
+        # Initialize dry_yield and total_irrigation in the info dictionary with default values (e.g., 0.0 or nan)
+        info = {'dry_yield': 0.0, 'total_irrigation': 0.0}
+
         if terminated:
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
             
             if total_irrigation == 0:
-                reward = -10  # Fixed penalty reward
+                reward = -10  # Apply small negative fixed reward for 0 irrigation
             else:
-                reward = (dry_yield ** 3) - ((total_irrigation + 1) * 15)
+                reward = ((dry_yield + 1) ** 3) - ((total_irrigation + 1) * 15)
+
+            # Store the final values in the info dictionary
+            info['dry_yield'] = dry_yield
+            info['total_irrigation'] = total_irrigation
 
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")
             print(f"Final Reward: {reward}")
-        
-        info = dict()
 
         return next_obs, reward, terminated, truncated, info
+
+
+
