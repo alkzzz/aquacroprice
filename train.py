@@ -115,7 +115,7 @@ train_env = DummyVecEnv([lambda: Monitor(Rice(mode='train', year1=1982, year2=20
 reward_logging_callback = RewardLoggingCallback(experiment)
 
 # Training parameters (shared among algorithms)
-train_timesteps = 1000
+train_timesteps = 20000
 
 # Define algorithms and hyperparameters with exploration encouragement
 algorithms = {
@@ -125,7 +125,7 @@ algorithms = {
         n_steps=4096,
         batch_size=64,
         n_epochs=10,
-        ent_coef=0.01
+        ent_coef=0.05
     ),
     "DQN": DQN(
         "MlpPolicy", train_env, verbose=1,
@@ -133,15 +133,15 @@ algorithms = {
         buffer_size=100000,
         batch_size=64,
         target_update_interval=1000,
-        exploration_initial_eps=1.0,
-        exploration_final_eps=0.1,
-        exploration_fraction=0.2
+        exploration_initial_eps=0.9,
+        exploration_final_eps=0.05,
+        exploration_fraction=0.15
     ),
     "ARS": ARS(
         "MlpPolicy", train_env, verbose=1,
-        n_delta=64,
+        n_delta=128,
         n_top=16,
-        delta_std=0.05
+        delta_std=0.1
     ),
 }
 
@@ -176,7 +176,7 @@ for name, model in algorithms.items():
     yields = []
     irrigations = []
     
-    for _ in range(10):  # Assuming you want to evaluate over 10 episodes
+    for _ in range(100):  # Assuming you want to evaluate over 10 episodes
         obs, done = eval_env.reset(), False
         while not done:
             action, _states = model.predict(obs, deterministic=True)
@@ -210,7 +210,7 @@ mean_reward, std_reward = evaluate_policy(random_agent, eval_env, n_eval_episode
 yields = []
 irrigations = []
 
-for _ in range(10):  # Assuming you want to evaluate over 10 episodes
+for _ in range(100):  # Assuming you want to evaluate over 10 episodes
     obs, done = eval_env.reset(), False
     while not done:
         action, _states = random_agent.predict(obs)

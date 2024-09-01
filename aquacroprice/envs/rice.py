@@ -21,7 +21,6 @@ config = dict(
     days_to_irr=7,
 )
 
-# Define the Rice environment class
 class Rice(gym.Env):
     def __init__(self, render_mode=None, mode='train', year1=None, year2=None):
         super(Rice, self).__init__()
@@ -29,6 +28,7 @@ class Rice(gym.Env):
         self.render_mode = render_mode
         self.days_to_irr = config["days_to_irr"]
         self.day_counter = 0  # Counter to track days since the last action
+        self.consecutive_zero_irrigation_episodes = 0  # Counter for consecutive zero irrigation episodes
 
         # If year1 and year2 are provided, override the default config
         self.year1 = year1 if year1 is not None else config["year1"]
@@ -49,7 +49,7 @@ class Rice(gym.Env):
         # Define observation space: Includes weather-related observations
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(14,), dtype=np.float32)
         
-        self.action_depths = [0, 25]
+        self.action_depths = [0, 15, 30]
         self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space with 6 actions
 
     def reset(self, seed=None, options=None):
@@ -185,9 +185,18 @@ class Rice(gym.Env):
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
             
             if total_irrigation == 0:
-                reward = -10  # Apply small negative fixed reward for 0 irrigation
+                # Increment the consecutive zero irrigation counter
+                self.consecutive_zero_irrigation_episodes += 1
+                # Apply a fixed penalty multiplied by the number of consecutive zero irrigation episodes
+                penalty = -1000 * self.consecutive_zero_irrigation_episodes
+                reward = penalty
+                print(f"Penalty Applied for Zero Irrigation: {penalty}")
             else:
+                # Reset the counter if irrigation is used
+                self.consecutive_zero_irrigation_episodes = 0
+                # Calculate the reward based on yield and irrigation
                 reward = ((dry_yield + 1) ** 3) - ((total_irrigation + 1) * 15)
+                print(f"Calculated Reward: {reward}")
 
             # Store the final values in the info dictionary
             info['dry_yield'] = dry_yield
@@ -198,6 +207,3 @@ class Rice(gym.Env):
             print(f"Final Reward: {reward}")
 
         return next_obs, reward, terminated, truncated, info
-
-
-
