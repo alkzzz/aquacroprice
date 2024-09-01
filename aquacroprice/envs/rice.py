@@ -155,12 +155,9 @@ class Rice(gym.Env):
 
         # Check if 7 days have passed since the last action
         if self.day_counter >= self.days_to_irr:
-            # Reset the day counter after performing the action
             self.day_counter = 0
-            # Scale the action values to the corresponding depth
             depth = self.action_depths[int(action)]
         else:
-            # Default to no irrigation on other days
             depth = 0
 
         # Apply the depth to the model
@@ -177,28 +174,35 @@ class Rice(gym.Env):
         current_timestep = self.model._clock_struct.time_step_counter
         self.irrigation_schedule.append((current_timestep, depth))  # Log the applied irrigation depth
         
-        # Initialize dry_yield and total_irrigation in the info dictionary with default values (e.g., 0.0 or nan)
         info = {'dry_yield': 0.0, 'total_irrigation': 0.0}
 
         if terminated:
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
-            
+
             if total_irrigation == 0:
-                # Increment the consecutive zero irrigation counter
                 self.consecutive_zero_irrigation_episodes += 1
-                # Apply a fixed penalty multiplied by the number of consecutive zero irrigation episodes
-                penalty = -1000 * self.consecutive_zero_irrigation_episodes
+                penalty = -10000 * self.consecutive_zero_irrigation_episodes
                 reward = penalty
                 print(f"Penalty Applied for Zero Irrigation: {penalty}")
             else:
-                # Reset the counter if irrigation is used
                 self.consecutive_zero_irrigation_episodes = 0
-                # Calculate the reward based on yield and irrigation
                 reward = ((dry_yield + 1) ** 3) - ((total_irrigation + 1) * 15)
-                print(f"Calculated Reward: {reward}")
 
-            # Store the final values in the info dictionary
+                # Calculate water efficiency
+                water_efficiency = dry_yield / (total_irrigation + 1e-6)  # Add a small value to avoid division by zero
+                print(f"Water Efficiency: {water_efficiency}")
+
+                # Apply a bonus or penalty based on water efficiency
+                if water_efficiency > 0.08:  # Arbitrary threshold for good efficiency
+                    efficiency_bonus = 500 * water_efficiency
+                    reward += efficiency_bonus
+                    print(f"Efficiency Bonus Applied: {efficiency_bonus}")
+                else:
+                    efficiency_penalty = -500 * (0.05 - water_efficiency)
+                    reward += efficiency_penalty
+                    print(f"Efficiency Penalty Applied: {efficiency_penalty}")
+
             info['dry_yield'] = dry_yield
             info['total_irrigation'] = total_irrigation
 
@@ -207,3 +211,4 @@ class Rice(gym.Env):
             print(f"Final Reward: {reward}")
 
         return next_obs, reward, terminated, truncated, info
+
