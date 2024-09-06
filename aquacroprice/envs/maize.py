@@ -169,16 +169,38 @@ class Maize(gym.Env):
         biomass = self.model._init_cond.biomass
         biomass_ns = self.model._init_cond.biomass_ns
         
-        # Calculate positive reward inversely proportional to biomass difference
+        # Calculate the biomass difference for this step
         biomass_diff = abs(biomass_ns - biomass)
-        reward = 1 / (1 + biomass_diff)  # Positive reward when biomass difference is small
+        
+        # Accumulate total biomass difference over the episode
+        if not hasattr(self, 'total_biomass_diff'):
+            self.total_biomass_diff = 0  # Initialize if not already present
+        self.total_biomass_diff += biomass_diff  # Accumulate the biomass difference
         
         # Penalize for irrigation depth applied during this step
         irrigation_penalty = depth * 0.2  # Penalty proportional to irrigation depth
-        reward -= irrigation_penalty  # Reduce reward for irrigation usage
+
+        # First irrigation reward logic
+        if depth > 0:
+            if not getattr(self, 'irrigated_once', False):
+                # Reward heavily for the first irrigation
+                first_irrigation_reward = 50.0  # Large reward for first irrigation
+                self.irrigated_once = True  # Mark that the agent has irrigated at least once
+                print("First irrigation: Large reward given!")
+            else:
+                # Penalize for any subsequent irrigation
+                first_irrigation_reward = -10.0  # Penalty for irrigating more than once
+                print("Subsequent irrigation: Penalty applied.")
+        else:
+            first_irrigation_reward = 0  # No special reward if no irrigation
+
+        # Accumulate total irrigation penalty over the episode
+        if not hasattr(self, 'total_irrigation_penalty'):
+            self.total_irrigation_penalty = 0  # Initialize if not already present
+        self.total_irrigation_penalty += irrigation_penalty  # Accumulate irrigation penalty
         
-        # Logging (optional)
-        # print(f"Biomass: {biomass}, Biomass NS: {biomass_ns}, Step Reward: {reward}, Irrigation Depth: {depth}, Irrigation Penalty: {irrigation_penalty}")
+        # Calculate the step reward based on biomass difference, irrigation penalty, and first irrigation reward
+        reward = (1 / (1 + biomass_diff)) - irrigation_penalty + first_irrigation_reward
         
         terminated = self.model._clock_struct.model_is_finished
         
@@ -190,22 +212,47 @@ class Maize(gym.Env):
             'total_irrigation': sum([item[1] for item in self.irrigation_schedule])  # Cumulative irrigation
         }
 
-        # If the season is finished, print the dry yield and total irrigation
+        # If the season is finished, apply the logic for no irrigation penalty only if there was no irrigation
         if terminated:
             # Get dry yield and total irrigation from the model
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
             
+            # Apply no-irrigation penalty only if the agent never irrigated
+            if not getattr(self, 'irrigated_once', False):
+                no_irrigation_penalty = 50  # Strong penalty for no irrigation when needed
+                print(f"Penalty Applied: Agent did not irrigate during the episode.")
+            else:
+                no_irrigation_penalty = 0  # No penalty if at least one irrigation occurred
+            
+            # Calculate final cumulative biomass reward based on total biomass difference
+            final_biomass_diff_reward = 1 / (1 + self.total_biomass_diff)  # Biomass difference reward for the episode
+            
             # Print final statistics
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")
-            print(f"Reward: {reward}")
+            print(f"Final Biomass Difference Reward: {final_biomass_diff_reward}")
+            print(f"Total Irrigation Penalty: {self.total_irrigation_penalty}")
+            print(f"No Irrigation Penalty: {no_irrigation_penalty}")
             
             # Add final stats to the info dictionary
             info['dry_yield'] = dry_yield
             info['total_irrigation'] = total_irrigation
 
+            # Reset cumulative values to 0 for the next episode
+            self.total_biomass_diff = 0
+            self.total_irrigation_penalty = 0
+            self.irrigated_once = False  # Reset irrigation flag for the next episode
+
+            # Apply the no-irrigation penalty to the total reward
+            reward -= no_irrigation_penalty
+
         return next_obs, reward, terminated, truncated, info
+
+
+
+
+
 
 
 
