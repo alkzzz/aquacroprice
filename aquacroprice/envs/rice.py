@@ -47,7 +47,7 @@ class Rice(gym.Env):
             self.soil = soil
 
         # Define observation space: Includes weather-related observations
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(14,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(9,), dtype=np.float32)
         
         self.action_depths = [0, 25]
         self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space with 6 actions
@@ -103,9 +103,9 @@ class Rice(gym.Env):
     def _get_obs(self):
         cond = self.model._init_cond
 
-        total_precipitation_last_7_days = self._get_total_precipitation_last_7_days()
-        cum_min_temp_last_7_days = self._get_cumulative_temp_last_7_days("MinTemp")
-        cum_max_temp_last_7_days = self._get_cumulative_temp_last_7_days("MaxTemp")
+        # total_precipitation_last_7_days = self._get_total_precipitation_last_7_days()
+        # cum_min_temp_last_7_days = self._get_cumulative_temp_last_7_days("MinTemp")
+        # cum_max_temp_last_7_days = self._get_cumulative_temp_last_7_days("MaxTemp")
         prev_day_min_temp = self._get_previous_day_value("MinTemp")
         prev_day_max_temp = self._get_previous_day_value("MaxTemp")
         prev_day_precipitation = self._get_previous_day_value("Precipitation")
@@ -114,14 +114,12 @@ class Rice(gym.Env):
             cond.age_days,
             cond.canopy_cover,
             cond.biomass,
-            cond.harvest_index,
-            cond.DryYield,
             cond.z_root,
             cond.depletion,
             cond.taw,
-            total_precipitation_last_7_days,
-            cum_min_temp_last_7_days,
-            cum_max_temp_last_7_days,
+            # total_precipitation_last_7_days,
+            # cum_min_temp_last_7_days,
+            # cum_max_temp_last_7_days,
             prev_day_min_temp,
             prev_day_max_temp,
             prev_day_precipitation,
@@ -152,7 +150,7 @@ class Rice(gym.Env):
     def step(self, action):
         # Increment the day counter
         self.day_counter += 1
-
+        
         # Check if 7 days have passed since the last action
         if self.day_counter >= self.days_to_irr:
             self.day_counter = 0
@@ -169,18 +167,13 @@ class Rice(gym.Env):
 
         # Initialize reward and check if first irrigation has been done
         reward = 0
-        if not hasattr(self, 'first_irrigation_done'):
-            self.first_irrigation_done = False  # Initialize if not already set
 
-        # First irrigation reward and subsequent penalties
+        # Add a decaying reward based on the irrigation depth
         if depth > 0:
-            if not self.first_irrigation_done:
-                reward += 200  # Increased reward for the first irrigation
-                self.first_irrigation_done = True
-                print("First Irrigation: Reward 200 applied.")
-            else:
-                reward -= 10  # Penalty for subsequent irrigations
-                print("Subsequent Irrigation: Penalty -10 applied.")
+            decay_factor = 0.95  # A decay factor, you can adjust this value
+            irrigation_penalty = depth * decay_factor ** self.model._clock_struct.time_step_counter
+            reward += irrigation_penalty
+            print(f"Irrigation Depth: {depth}, Irrigation Reward: {irrigation_penalty}")
 
         # Check if the model is finished (season ends)
         terminated = self.model._clock_struct.model_is_finished
@@ -196,14 +189,9 @@ class Rice(gym.Env):
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
 
-            if total_irrigation == 0:
-                reward -= 500  # No irrigation penalty
-                print("Penalty Applied for Zero Irrigation: -500")
-            else:
-                # Base reward with yield cubed and irrigation penalty reduced to 15x
-                final_reward = ((dry_yield + 1) ** 3) - ((total_irrigation + 1) * 15)
-                reward += final_reward  # Add the final reward to the step reward
-                print(f"Base Final Reward: {final_reward}")
+            final_reward = ((dry_yield + 1) ** 3) - ((total_irrigation + 1) * 10)
+            reward += final_reward  # Add the final reward to the step reward
+            print(f"Base Final Reward: {final_reward}")
 
             # Print final results
             print(f"Dry Yield: {dry_yield}")
@@ -217,6 +205,7 @@ class Rice(gym.Env):
             self.first_irrigation_done = False
 
         return next_obs, reward, terminated, truncated, info
+
 
 
 
