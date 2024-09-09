@@ -121,11 +121,11 @@ train_timesteps = 20000
 algorithms = {
     "PPO": PPO(
         "MlpPolicy", train_env, verbose=1,
-        learning_rate=5e-4,
+        learning_rate=5e-4,  # Keep the same
         n_steps=4096,
         batch_size=64,
         n_epochs=10,
-        ent_coef=0.05
+        ent_coef=0.1  # Increased for higher exploration
     ),
     "DQN": DQN(
         "MlpPolicy", train_env, verbose=1,
@@ -133,15 +133,15 @@ algorithms = {
         buffer_size=100000,
         batch_size=64,
         target_update_interval=1000,
-        exploration_initial_eps=0.9,
+        exploration_initial_eps=1.0,  # Increase for more initial exploration
         exploration_final_eps=0.05,
-        exploration_fraction=0.15
+        exploration_fraction=0.3  # Slower decay, exploration for a longer period
     ),
     "ARS": ARS(
         "MlpPolicy", train_env, verbose=1,
         n_delta=128,
         n_top=16,
-        delta_std=0.1
+        delta_std=0.2
     ),
 }
 

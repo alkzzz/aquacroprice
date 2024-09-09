@@ -16,7 +16,7 @@ config = dict(
     year1=1982,
     year2=2018,
     crop='Maize',
-    soil='SandyLoam',
+    soil='ClayLoam',
     init_wc=InitialWaterContent(value=['FC']),
     days_to_irr=7,
 )
@@ -38,7 +38,8 @@ class Wheat(gym.Env):
         self.climate = config['climate']
         self.irrigation_schedule = []  # Store Irrigation Schedule
         self.mode = mode  # 'train' or 'eval'
-        
+
+        # Soil initialization
         soil = config['soil']
         if isinstance(soil, str):
             self.soil = Soil(soil)
@@ -46,11 +47,15 @@ class Wheat(gym.Env):
             assert isinstance(soil, Soil), "soil needs to be 'str' or 'Soil'"
             self.soil = soil
 
-        # Define observation space: Includes weather-related observations
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(12,), dtype=np.float32)
-        
-        self.action_depths = [0, 15, 30]
-        self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space with 6 actions
+        # Define observation space and action space
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(9,), dtype=np.float32)
+        # self.action_space = spaces.Box(low=-1., high=1., shape=(4,), dtype=np.float32)
+
+        self.action_space = spaces.MultiDiscrete([101, 101, 101, 101])
+        self.max_irr_season = 500  # Max irrigation for the entire season (300 mm)
+
+        # Store the SMT value to be used during one episode
+        self.current_smt = None  # This will hold the SMT during the episode
 
     def reset(self, seed=None, options=None):
         print("Resetting environment...")
@@ -80,18 +85,27 @@ class Wheat(gym.Env):
         self.irr_sched = []
         self.day_counter = 0  # Reset day counter
 
-        # Initialize the AquaCrop model
+        # If no SMT is set, we assign default values (initial episode)
+        if self.current_smt is None:
+            self.current_smt = np.ones(4) * 50  # Default SMT of 50 for all thresholds
+
+        # Initialize the AquaCrop model with SMT irrigation method
         self.model = AquaCropModel(
             f'{self.simcalyear}/{self.planting_date}', 
             f'{self.simcalyear}/12/31', 
             self.wdf, 
             self.soil, 
             self.crop,
-            irrigation_management=IrrigationManagement(irrigation_method=1),
+            irrigation_management=IrrigationManagement(irrigation_method=2, SMT=self.current_smt, MaxIrrSeason=self.max_irr_season),  # SMT method
             initial_water_content=self.init_wc
         )
 
+        # Run the model for the first step
         self.model.run_model()
+
+        # Set SMT values for the entire episode
+        # self.model._param_struct.IrrMngt.SMT = self.current_smt
+        print(f"Set initial SMT for the episode: {self.current_smt}")
 
         self.cumulative_reward = 0.0
         
@@ -103,12 +117,9 @@ class Wheat(gym.Env):
     def _get_obs(self):
         cond = self.model._init_cond
 
-        total_precipitation_last_7_days = self._get_total_precipitation_last_7_days()
-        cum_min_temp_last_7_days = self._get_cumulative_temp_last_7_days("MinTemp")
-        cum_max_temp_last_7_days = self._get_cumulative_temp_last_7_days("MaxTemp")
-        prev_day_min_temp = self._get_previous_day_value("MinTemp")
-        prev_day_max_temp = self._get_previous_day_value("MaxTemp")
-        prev_day_precipitation = self._get_previous_day_value("Precipitation")
+        week_min_temp = self._get_cumulative_temp_last_7_days("MinTemp")
+        week_max_temp = self._get_cumulative_temp_last_7_days("MaxTemp")
+        week_precipitation = self._get_total_precipitation_last_7_days()
 
         obs = np.array([
             cond.age_days,
@@ -117,16 +128,24 @@ class Wheat(gym.Env):
             cond.z_root,
             cond.depletion,
             cond.taw,
-            total_precipitation_last_7_days,
-            cum_min_temp_last_7_days,
-            cum_max_temp_last_7_days,
-            prev_day_min_temp,
-            prev_day_max_temp,
-            prev_day_precipitation,
+            week_min_temp,
+            week_max_temp,
+            week_precipitation
+            # prev_day_min_temp,
+            # prev_day_max_temp,
+            # prev_day_precipitation,
         ], dtype=np.float32)
 
         return obs
 
+    def _get_previous_day_value(self, col):
+        current_day = self.model._clock_struct.time_step_counter
+        if current_day > 0:
+            prev_day_value = self.wdf.iloc[current_day - 1][col]
+        else:
+            prev_day_value = 0.0  # If it's the first day, there's no previous day data
+        return prev_day_value
+    
     def _get_total_precipitation_last_7_days(self):
         current_day = self.model._clock_struct.time_step_counter
         last_7_days = self.wdf.iloc[max(0, current_day - 7):current_day]
@@ -139,68 +158,37 @@ class Wheat(gym.Env):
         cumulative_temp = last_7_days[temp_col].sum()
         return cumulative_temp
 
-    def _get_previous_day_value(self, col):
-        current_day = self.model._clock_struct.time_step_counter
-        if current_day > 0:
-            prev_day_value = self.wdf.iloc[current_day - 1][col]
-        else:
-            prev_day_value = 0.0  # If it's the first day, there's no previous day data
-        return prev_day_value
-
     def step(self, action):
-        # Increment the day counter
-        self.day_counter += 1
+        # Do not update SMT during the episode, we keep using the same SMT values
+        # print(f"Using constant SMT for the episode: {self.current_smt}")
 
-        # Check if 7 days have passed since the last action
-        if self.day_counter >= self.days_to_irr:
-            self.day_counter = 0
-            depth = self.action_depths[int(action)]
-        else:
-            depth = 0
-
-        # Apply the depth to the model
-        self.model._param_struct.IrrMngt.depth = depth
+        # Run the AquaCrop model for the next step in the growing season
         self.model.run_model(initialize_model=False)
-        
-        truncated = False
-        next_obs = self._get_obs()
-        
-        # Retrieve biomass and biomass non-stress
-        biomass = self.model._init_cond.biomass
-        biomass_ns = self.model._init_cond.biomass_ns
-        
-        # Calculate the reward at each step based on the difference in biomass
-        # We want to minimize the difference, so we subtract the absolute difference from the reward
-        reward = -0.1 * abs(biomass_ns - biomass)
-        
-        print(f"Biomass: {biomass}, Biomass NS: {biomass_ns}, Step Reward: {reward}")
-        
-        terminated = self.model._clock_struct.model_is_finished
-        
-        current_timestep = self.model._clock_struct.time_step_counter
-        self.irrigation_schedule.append((current_timestep, depth))  # Log the applied irrigation depth
-        
-        info = {'dry_yield': 0.0, 'total_irrigation': 0.0}
 
-        # If the season is finished, add yield and total irrigation to the reward
+        next_obs = self._get_obs()
+        truncated = False
+
+        # Check if the model is finished (season ends)
+        terminated = self.model._clock_struct.model_is_finished
+
+        # Log the irrigation and calculate rewards at the end of the season
+        info = {'dry_yield': 0.0, 'total_irrigation': 0.0}
+        reward = 0
+
         if terminated:
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
-            
-            reward += dry_yield
-            
-            # Increase the irrigation penalty weight to 0.5
-            irrigation_penalty = total_irrigation * 0.5
-            reward -= irrigation_penalty
-            
+
+            reward = ((dry_yield + 1) ** 3) - ((total_irrigation + 1) * 10)
             info['dry_yield'] = dry_yield
             info['total_irrigation'] = total_irrigation
 
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")
-            print(f"Irrigation Penalty: {irrigation_penalty}")
-            print(f"Final Reward: {reward}")
+            print(f"Reward: {reward}")
+
+            # Update the SMT values for the next episode based on the action
+            self.current_smt = np.array(action)
+            print(f"New SMT for the next episode: {self.current_smt}")
 
         return next_obs, reward, terminated, truncated, info
-
-

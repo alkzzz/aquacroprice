@@ -27,11 +27,17 @@ class RewardLoggingCallback(BaseCallback):
         self.best_schedule = []
         self.yields = []  # To store yield values for each episode
         self.irrigations = []  # To store irrigation values for each episode
+        self.losses = []  # To store loss values during training
 
     def _on_step(self) -> bool:
         if 'rewards' in self.locals:
             mean_reward = np.mean(self.locals['rewards'])
             self.current_rewards += mean_reward
+
+        # Capture the loss from the model's optimizer (if available)
+        if 'loss' in self.locals:
+            loss = self.locals['loss']
+            self.losses.append(loss)
 
         if 'dones' in self.locals and any(self.locals['dones']):
             env = self.locals['env'].envs[0]
@@ -40,14 +46,8 @@ class RewardLoggingCallback(BaseCallback):
             dry_yield = info.get('dry_yield', float('nan'))
             total_irrigation = info.get('total_irrigation', float('nan'))
 
-            if not np.isnan(dry_yield) and not np.isnan(total_irrigation):
-                print(f"Episode ended. Dry yield: {dry_yield}, Total irrigation: {total_irrigation}")
-
-                self.yields.append(dry_yield)
-                self.irrigations.append(total_irrigation)
-            else:
-                print("Final stats not available or contain NaN values.")
-
+            self.yields.append(dry_yield)
+            self.irrigations.append(total_irrigation)
             self.episode_rewards.append(self.current_rewards)
             self.episode_schedules.append(env.unwrapped.irrigation_schedule)
 
@@ -65,6 +65,7 @@ class RewardLoggingCallback(BaseCallback):
     def _on_training_end(self):
         self.plot_rewards()
         self.plot_irrigation_schedule()
+        self.plot_losses()
 
         # Calculate and log mean yield and irrigation at the end of training
         if self.yields and self.irrigations:
@@ -101,6 +102,18 @@ class RewardLoggingCallback(BaseCallback):
         else:
             print("No irrigation schedule found for any episode.")
 
+    def plot_losses(self):
+        if self.losses:
+            plt.figure(figsize=(10, 5))
+            plt.plot(range(len(self.losses)), self.losses)
+            plt.xlabel('Training Steps')
+            plt.ylabel('Loss')
+            plt.title('Loss over Training Steps')
+            plt.savefig('loss_plot.png')
+            print("Loss plot saved as loss_plot.png")
+        else:
+            print("No loss values to plot.")
+
 # Initialize Comet.ml experiment in offline mode
 experiment = OfflineExperiment(
     project_name="aqua-gym-rice",
@@ -115,34 +128,34 @@ train_env = DummyVecEnv([lambda: Monitor(Wheat(mode='train', year1=1982, year2=2
 reward_logging_callback = RewardLoggingCallback(experiment)
 
 # Training parameters (shared among algorithms)
-train_timesteps = 20000
+train_timesteps = 10000
 
 # Define algorithms and hyperparameters with exploration encouragement
 algorithms = {
     "PPO": PPO(
         "MlpPolicy", train_env, verbose=1,
-        learning_rate=5e-4,
+        learning_rate=5e-4,  # Keep the same
         n_steps=4096,
         batch_size=64,
         n_epochs=10,
-        ent_coef=0.05
+        ent_coef=0.1  # Increased for higher exploration
     ),
-    "DQN": DQN(
-        "MlpPolicy", train_env, verbose=1,
-        learning_rate=1e-3,
-        buffer_size=100000,
-        batch_size=64,
-        target_update_interval=1000,
-        exploration_initial_eps=0.9,
-        exploration_final_eps=0.05,
-        exploration_fraction=0.15
-    ),
-    "ARS": ARS(
-        "MlpPolicy", train_env, verbose=1,
-        n_delta=128,
-        n_top=16,
-        delta_std=0.1
-    ),
+    # "DQN": DQN(
+    #     "MlpPolicy", train_env, verbose=1,
+    #     learning_rate=1e-3,
+    #     buffer_size=100000,
+    #     batch_size=64,
+    #     target_update_interval=1000,
+    #     exploration_initial_eps=1.0,  # Increase for more initial exploration
+    #     exploration_final_eps=0.05,
+    #     exploration_fraction=0.3  # Slower decay, exploration for a longer period
+    # ),
+    # "ARS": ARS(
+    #     "MlpPolicy", train_env, verbose=1,
+    #     n_delta=128,
+    #     n_top=16,
+    #     delta_std=0.2
+    # ),
 }
 
 # Define the Random Agent
