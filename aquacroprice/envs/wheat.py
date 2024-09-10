@@ -52,7 +52,7 @@ class Wheat(gym.Env):
         # self.action_space = spaces.Box(low=-1., high=1., shape=(4,), dtype=np.float32)
 
         self.action_space = spaces.MultiDiscrete([101, 101, 101, 101])
-        self.max_irr_season = 500  # Max irrigation for the entire season (300 mm)
+        self.max_irr_season = 250  # Max irrigation for the entire season (300 mm)
 
         # Store the SMT value to be used during one episode
         self.current_smt = None  # This will hold the SMT during the episode

@@ -18,7 +18,7 @@ config = dict(
     crop='Maize',
     soil='SandyLoam',
     init_wc=InitialWaterContent(value=['FC']),
-    days_to_irr=7,
+    days_to_irr=3,
 )
 
 class Maize(gym.Env):
@@ -149,20 +149,19 @@ class Maize(gym.Env):
 
     def step(self, action):
         # Increment the day counter
-        # self.day_counter += 1
+        self.day_counter += 1
 
         # Check if 7 days have passed since the last action
-        # if self.day_counter >= self.days_to_irr:
-        #     self.day_counter = 0
-        #     depth = self.action_depths[int(action)]
-        # else:
-        #     depth = 0
+        if self.day_counter >= self.days_to_irr:
+            self.day_counter = 0
+            depth = self.action_depths[int(action)]
+        else:
+            depth = 0
 
         # Apply the depth to the model
-        depth = self.action_depths[int(action)]
         self.model._param_struct.IrrMngt.depth = depth
         self.model.run_model(initialize_model=False)
-        
+
         truncated = False
         next_obs = self._get_obs()
         
@@ -171,14 +170,11 @@ class Maize(gym.Env):
         biomass_ns = self.model._init_cond.biomass_ns
         
         # Calculate the reward as inversely proportional to the difference between biomass and biomass_ns
-        # Smaller differences lead to higher rewards
         delta_biomass = abs(biomass_ns - biomass)
         reward = 1 / (1 + delta_biomass)
-        
-        # print(f"Biomass: {biomass}, Biomass NS: {biomass_ns}, Delta Biomass: {delta_biomass}, Step Reward: {reward}")
-        
+
         terminated = self.model._clock_struct.model_is_finished
-        
+
         current_timestep = self.model._clock_struct.time_step_counter
         self.irrigation_schedule.append((current_timestep, depth))  # Log the applied irrigation depth
         
@@ -188,18 +184,31 @@ class Maize(gym.Env):
         if terminated:
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
-            
-            final_reward = ((dry_yield + 1) ** 3) - ((total_irrigation + 1) * 10)
+
+            # 1. Yield reward (scaled more aggressively)
+            yield_reward = (dry_yield ** 3) / 25
+
+            # 2. Water penalty (reduced multiplier for exceeding the threshold)
+            irrigation_threshold = 250
+            if total_irrigation > irrigation_threshold:
+                water_penalty = (total_irrigation - irrigation_threshold) * 0.5
+            else:
+                water_penalty = 0
+
+            # 3. Final reward is yield reward minus water penalty
+            final_reward = yield_reward - water_penalty
             reward += final_reward  # Add the final reward to the step reward
             
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")
-            print(f"Final Reward: {reward}")
+            print(f"Yield Reward: {yield_reward}, Water Penalty: {water_penalty}, Final Reward: {reward}")
 
             info['dry_yield'] = dry_yield
             info['total_irrigation'] = total_irrigation
 
         return next_obs, reward, terminated, truncated, info
+
+
 
 
 

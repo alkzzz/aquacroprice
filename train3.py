@@ -135,10 +135,10 @@ algorithms = {
     "PPO": PPO(
         "MlpPolicy", train_env, verbose=1,
         learning_rate=5e-4,  # Keep the same
-        n_steps=4096,
+        n_steps=1024,
         batch_size=64,
-        n_epochs=10,
-        ent_coef=0.1  # Increased for higher exploration
+        n_epochs=20,
+        ent_coef=0.01  # Increased for higher exploration
     ),
     # "DQN": DQN(
     #     "MlpPolicy", train_env, verbose=1,
