@@ -30,15 +30,21 @@ class RewardLoggingCallback(BaseCallback):
         self.losses = []  # Track losses per episode
 
     def _on_step(self) -> bool:
+        # Track rewards
         if 'rewards' in self.locals:
             mean_reward = np.mean(self.locals['rewards'])
             self.current_rewards += mean_reward
 
-        # Access loss if available (specific to PPO or similar models)
-        if 'loss' in self.locals:
-            loss = self.locals['loss']
-            self.losses.append(loss)  # Track the loss at each step
+        # Track loss if PPO model is being used
+        if hasattr(self.model, 'policy'):
+            # Access loss from PPO policy after the optimization step
+            if hasattr(self.model.policy, 'logger'):
+                loss = self.model.policy.logger.name_to_value.get('train/loss', None)
+                if loss is not None:
+                    print(f"Logging loss: {loss}")
+                    self.losses.append(loss)  # Track the loss
 
+        # Episode ends
         if 'dones' in self.locals and any(self.locals['dones']):
             env = self.locals['env'].envs[0]
             info = self.locals['infos'][0]
@@ -48,7 +54,6 @@ class RewardLoggingCallback(BaseCallback):
 
             if not np.isnan(dry_yield) and not np.isnan(total_irrigation):
                 print(f"Episode ended. Dry yield: {dry_yield}, Total irrigation: {total_irrigation}")
-
                 self.yields.append(dry_yield)
                 self.irrigations.append(total_irrigation)
 

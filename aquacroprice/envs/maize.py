@@ -47,7 +47,7 @@ class Maize(gym.Env):
             self.soil = soil
 
         # Define observation space: Includes weather-related observations
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(12,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(9,), dtype=np.float32)
         
         self.action_depths = [0, 25]
         self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space with 6 actions
@@ -120,9 +120,9 @@ class Maize(gym.Env):
             total_precipitation_last_7_days,
             cum_min_temp_last_7_days,
             cum_max_temp_last_7_days,
-            prev_day_min_temp,
-            prev_day_max_temp,
-            prev_day_precipitation,
+            # prev_day_min_temp,
+            # prev_day_max_temp,
+            # prev_day_precipitation,
         ], dtype=np.float32)
 
         return obs
@@ -174,7 +174,7 @@ class Maize(gym.Env):
         delta_biomass = abs(biomass_ns - biomass)
         reward = 1 / (1 + delta_biomass)
         
-        print(f"Biomass: {biomass}, Biomass NS: {biomass_ns}, Delta Biomass: {delta_biomass}, Step Reward: {reward}")
+        # print(f"Biomass: {biomass}, Biomass NS: {biomass_ns}, Delta Biomass: {delta_biomass}, Step Reward: {reward}")
         
         terminated = self.model._clock_struct.model_is_finished
         
@@ -188,13 +188,8 @@ class Maize(gym.Env):
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
             
-            if total_irrigation > 0:
-                irrigation_efficiency = dry_yield / total_irrigation
-            else:
-                irrigation_efficiency = 0  # Avoid division by zero
-        
-            # Add the irrigation efficiency to the reward
-            reward += irrigation_efficiency
+            final_reward = ((dry_yield + 1) ** 3) - ((total_irrigation + 1) * 10)
+            reward += final_reward  # Add the final reward to the step reward
             
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")
