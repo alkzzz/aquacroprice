@@ -188,8 +188,13 @@ class Maize(gym.Env):
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
             
-            # Optionally, add the final dry yield to the reward for overall yield optimization
-            reward += dry_yield
+            if total_irrigation > 0:
+                irrigation_efficiency = dry_yield / total_irrigation
+            else:
+                irrigation_efficiency = 0  # Avoid division by zero
+        
+            # Add the irrigation efficiency to the reward
+            reward += irrigation_efficiency
             
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")

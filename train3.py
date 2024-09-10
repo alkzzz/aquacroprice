@@ -128,7 +128,7 @@ train_env = DummyVecEnv([lambda: Monitor(Wheat(mode='train', year1=1982, year2=2
 reward_logging_callback = RewardLoggingCallback(experiment)
 
 # Training parameters (shared among algorithms)
-train_timesteps = 10000
+train_timesteps = 20000
 
 # Define algorithms and hyperparameters with exploration encouragement
 algorithms = {

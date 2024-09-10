@@ -27,15 +27,21 @@ class RewardLoggingCallback(BaseCallback):
         self.best_schedule = []
         self.yields = []  # To store yield values for each episode
         self.irrigations = []  # To store irrigation values for each episode
+        self.losses = []  # Track losses per episode
 
     def _on_step(self) -> bool:
         if 'rewards' in self.locals:
             mean_reward = np.mean(self.locals['rewards'])
             self.current_rewards += mean_reward
 
+        # Access loss if available (specific to PPO or similar models)
+        if 'loss' in self.locals:
+            loss = self.locals['loss']
+            self.losses.append(loss)  # Track the loss at each step
+
         if 'dones' in self.locals and any(self.locals['dones']):
             env = self.locals['env'].envs[0]
-            info = self.locals['infos'][0]  # Access the info dictionary from the environment
+            info = self.locals['infos'][0]
 
             dry_yield = info.get('dry_yield', float('nan'))
             total_irrigation = info.get('total_irrigation', float('nan'))
@@ -45,8 +51,6 @@ class RewardLoggingCallback(BaseCallback):
 
                 self.yields.append(dry_yield)
                 self.irrigations.append(total_irrigation)
-            else:
-                print("Final stats not available or contain NaN values.")
 
             self.episode_rewards.append(self.current_rewards)
             self.episode_schedules.append(env.unwrapped.irrigation_schedule)
@@ -65,8 +69,8 @@ class RewardLoggingCallback(BaseCallback):
     def _on_training_end(self):
         self.plot_rewards()
         self.plot_irrigation_schedule()
+        self.plot_loss()
 
-        # Calculate and log mean yield and irrigation at the end of training
         if self.yields and self.irrigations:
             mean_yield = np.mean(self.yields)
             mean_irrigation = np.mean(self.irrigations)
@@ -100,6 +104,18 @@ class RewardLoggingCallback(BaseCallback):
             print("Irrigation schedule plot saved as best_irrigation_schedule_plot.png")
         else:
             print("No irrigation schedule found for any episode.")
+
+    def plot_loss(self):
+        if len(self.losses) > 0:
+            plt.figure(figsize=(10, 5))
+            plt.plot(range(len(self.losses)), self.losses)
+            plt.xlabel('Steps')
+            plt.ylabel('Loss')
+            plt.title('Training Loss over Time')
+            plt.savefig('loss_plot.png')
+            print("Loss plot saved as loss_plot.png")
+        else:
+            print("No loss values found during training.")
 
 # Initialize Comet.ml experiment in offline mode
 experiment = OfflineExperiment(
