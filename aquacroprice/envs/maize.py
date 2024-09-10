@@ -49,7 +49,7 @@ class Maize(gym.Env):
         # Define observation space: Includes weather-related observations
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(9,), dtype=np.float32)
         
-        self.action_depths = [0, 25]
+        self.action_depths = [0,5,10,15,20,25,30]
         self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space with 6 actions
 
     def reset(self, seed=None, options=None):
@@ -149,16 +149,17 @@ class Maize(gym.Env):
 
     def step(self, action):
         # Increment the day counter
-        self.day_counter += 1
+        # self.day_counter += 1
 
         # Check if 7 days have passed since the last action
-        if self.day_counter >= self.days_to_irr:
-            self.day_counter = 0
-            depth = self.action_depths[int(action)]
-        else:
-            depth = 0
+        # if self.day_counter >= self.days_to_irr:
+        #     self.day_counter = 0
+        #     depth = self.action_depths[int(action)]
+        # else:
+        #     depth = 0
 
         # Apply the depth to the model
+        depth = self.action_depths[int(action)]
         self.model._param_struct.IrrMngt.depth = depth
         self.model.run_model(initialize_model=False)
         
