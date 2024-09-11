@@ -27,8 +27,7 @@ class Maize(gym.Env):
         print("Initializing Maize environment...")
         self.render_mode = render_mode
         self.days_to_irr = config["days_to_irr"]
-        self.day_counter = 0  # Counter to track days since the last action
-        self.consecutive_zero_irrigation_episodes = 0  # Counter for consecutive zero irrigation episodes
+        self.day_counter = 0
 
         # If year1 and year2 are provided, override the default config
         self.year1 = year1 if year1 is not None else config["year1"]
@@ -38,7 +37,7 @@ class Maize(gym.Env):
         self.climate = config['climate']
         self.irrigation_schedule = []  # Store Irrigation Schedule
         self.mode = mode  # 'train' or 'eval'
-        
+
         soil = config['soil']
         if isinstance(soil, str):
             self.soil = Soil(soil)
@@ -48,12 +47,20 @@ class Maize(gym.Env):
 
         # Define observation space: Includes weather-related observations
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(9,), dtype=np.float32)
-        
-        self.action_depths = [0,5,10,15,20,25,30]
-        self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space with 6 actions
+
+        self.action_depths = [0, 25]
+        self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space
+
+        # Open a log file for debugging output
+        self.log_file = open("debug.txt", "a")
+
+    def log(self, message):
+        """Helper method to log a message to the text file."""
+        self.log_file.write(message + "\n")
+        self.log_file.flush()  # Ensure the message is written immediately
 
     def reset(self, seed=None, options=None):
-        print("Resetting environment...")
+        self.log("Resetting environment...")
         super().reset(seed=seed)
 
         if seed is not None:
@@ -61,7 +68,7 @@ class Maize(gym.Env):
 
         sim_year = np.random.randint(self.year1, self.year2 + 1)
         self.simcalyear = sim_year
-        print(f"Chosen Year: {self.simcalyear}")
+        self.log(f"Chosen Year: {self.simcalyear}")
 
         crop = config['crop']
         self.planting_date = '05/01'
@@ -72,12 +79,13 @@ class Maize(gym.Env):
             assert isinstance(crop, Crop), "crop needs to be 'str' or 'Crop'"
             self.crop = crop
 
-        print(f"Crop Planting Date: {self.crop.planting_date}")
+        self.log(f"Crop Planting Date: {self.crop.planting_date}")
 
         self.wdf = prepare_weather(get_filepath(self.climate))
         self.wdf['Year'] = self.simcalyear
 
         self.irr_sched = []
+        self.total_irrigation_applied = 0
         self.day_counter = 0  # Reset day counter
 
         # Initialize the AquaCrop model
@@ -93,11 +101,13 @@ class Maize(gym.Env):
 
         self.model.run_model()
 
-        self.cumulative_reward = 0.0
-        
+        self.total_irrigation_applied = 0
+        self.cumulative_reward = 0
+
         obs = self._get_obs()
         info = dict()
 
+        self.log("Environment reset complete.")
         return obs, info
 
     def _get_obs(self):
@@ -106,9 +116,6 @@ class Maize(gym.Env):
         total_precipitation_last_7_days = self._get_total_precipitation_last_7_days()
         cum_min_temp_last_7_days = self._get_cumulative_temp_last_7_days("MinTemp")
         cum_max_temp_last_7_days = self._get_cumulative_temp_last_7_days("MaxTemp")
-        prev_day_min_temp = self._get_previous_day_value("MinTemp")
-        prev_day_max_temp = self._get_previous_day_value("MaxTemp")
-        prev_day_precipitation = self._get_previous_day_value("Precipitation")
 
         obs = np.array([
             cond.age_days,
@@ -120,9 +127,6 @@ class Maize(gym.Env):
             total_precipitation_last_7_days,
             cum_min_temp_last_7_days,
             cum_max_temp_last_7_days,
-            # prev_day_min_temp,
-            # prev_day_max_temp,
-            # prev_day_precipitation,
         ], dtype=np.float32)
 
         return obs
@@ -139,85 +143,54 @@ class Maize(gym.Env):
         cumulative_temp = last_7_days[temp_col].sum()
         return cumulative_temp
 
-    def _get_previous_day_value(self, col):
-        current_day = self.model._clock_struct.time_step_counter
-        if current_day > 0:
-            prev_day_value = self.wdf.iloc[current_day - 1][col]
-        else:
-            prev_day_value = 0.0  # If it's the first day, there's no previous day data
-        return prev_day_value
-
+    # Example code for step function with penalty system and random agent info
     def step(self, action):
-        # Increment the day counter
-        self.day_counter += 1
-
-        # Check if 7 days have passed since the last action
-        if self.day_counter >= self.days_to_irr:
-            self.day_counter = 0
-            depth = self.action_depths[int(action)]
-        else:
-            depth = 0
-
-        # Apply the depth to the model
+        # Apply irrigation based on action (either 25 mm or 0 mm)
+        depth = self.action_depths[int(action)]
         self.model._param_struct.IrrMngt.depth = depth
         self.model.run_model(initialize_model=False)
 
-        truncated = False
         next_obs = self._get_obs()
-        
-        # Retrieve the current biomass and non-stress biomass
-        biomass = self.model._init_cond.biomass
-        biomass_ns = self.model._init_cond.biomass_ns
-        
-        # Calculate the reward as inversely proportional to the difference between biomass and biomass_ns
-        delta_biomass = abs(biomass_ns - biomass)
-        reward = 1 / (1 + delta_biomass)
-
         terminated = self.model._clock_struct.model_is_finished
 
+        # Add the current irrigation depth to the irrigation schedule
         current_timestep = self.model._clock_struct.time_step_counter
-        self.irrigation_schedule.append((current_timestep, depth))  # Log the applied irrigation depth
-        
-        info = {'dry_yield': 0.0, 'total_irrigation': 0.0}
+        self.irrigation_schedule.append((current_timestep, depth))
 
-        # If the season is finished, provide final yield and irrigation data
+        # Update the total irrigation applied so far
+        previous_total_irrigation = self.total_irrigation_applied
+        self.total_irrigation_applied += depth
+        self.log(f"Action taken: {action}, Depth: {depth}, Total Irrigation: {self.total_irrigation_applied}")
+
+        # Apply penalty for irrigation once total irrigation exceeds 300 mm
+        if previous_total_irrigation >= 400 and depth > 0:
+            # Penalize for irrigation after exceeding 300 mm
+            self.cumulative_reward -= depth
+            self.log(f"Penalty applied for exceeding 300 mm: -{depth}. Cumulative reward: {self.cumulative_reward}")
+
+        # If the season is finished, calculate the final reward
         if terminated:
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
 
-            # 1. Yield reward (scaled more aggressively)
-            yield_reward = (dry_yield ** 3) / 25
-
-            # 2. Water penalty (reduced multiplier for exceeding the threshold)
-            irrigation_threshold = 250
-            if total_irrigation > irrigation_threshold:
-                water_penalty = (total_irrigation - irrigation_threshold) * 0.5
-            else:
-                water_penalty = 0
-
-            # 3. Final reward is yield reward minus water penalty
-            final_reward = yield_reward - water_penalty
-            reward += final_reward  # Add the final reward to the step reward
+            # Add yield-based reward separately from penalties
+            yield_reward = dry_yield ** 2
             
-            print(f"Dry Yield: {dry_yield}")
-            print(f"Total Irrigation: {total_irrigation}")
-            print(f"Yield Reward: {yield_reward}, Water Penalty: {water_penalty}, Final Reward: {reward}")
+            if total_irrigation < 400:
+                self.cumulative_reward += (yield_reward - (400 - total_irrigation))
+            else:
+                self.cumulative_reward += yield_reward
+                
+            self.log(f"Dry Yield: {dry_yield}, Total Irrigation: {total_irrigation}")
+            self.log(f"Yield Reward: {yield_reward}. Final cumulative reward: {self.cumulative_reward}")
 
-            info['dry_yield'] = dry_yield
-            info['total_irrigation'] = total_irrigation
+            info = {'dry_yield': dry_yield, 'total_irrigation': total_irrigation}
+        else:
+            info = {'dry_yield': 0.0, 'total_irrigation': 0.0}
 
-        return next_obs, reward, terminated, truncated, info
+        # Return the next observation, the cumulative reward, and whether the episode is done
+        return next_obs, self.cumulative_reward, terminated, False, info
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+    def close(self):
+        # Close the log file when the environment is closed
+        self.log_file.close()

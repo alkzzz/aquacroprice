@@ -1,12 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from comet_ml import OfflineExperiment
-from stable_baselines3 import PPO, DQN
+from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
-from sb3_contrib import ARS
 from aquacroprice.envs.maize import Maize
 
 import warnings
@@ -22,29 +20,19 @@ class RewardLoggingCallback(BaseCallback):
         self.experiment = experiment
         self.episode_rewards = []
         self.episode_schedules = []
-        self.current_rewards = 0
+        self.current_episode_rewards = []  # To store rewards per episode
         self.highest_reward = -np.inf
         self.best_schedule = []
         self.yields = []  # To store yield values for each episode
         self.irrigations = []  # To store irrigation values for each episode
-        self.losses = []  # Track losses per episode
 
     def _on_step(self) -> bool:
-        # Track rewards
+        # Track individual rewards
         if 'rewards' in self.locals:
-            mean_reward = np.mean(self.locals['rewards'])
-            self.current_rewards += mean_reward
+            reward = self.locals['rewards'][0]
+            self.current_episode_rewards.append(reward)
 
-        # Track loss if PPO model is being used
-        if hasattr(self.model, 'policy'):
-            # Access loss from PPO policy after the optimization step
-            if hasattr(self.model.policy, 'logger'):
-                loss = self.model.policy.logger.name_to_value.get('train/loss', None)
-                if loss is not None:
-                    print(f"Logging loss: {loss}")
-                    self.losses.append(loss)  # Track the loss
-
-        # Episode ends
+        # Check if the episode is done
         if 'dones' in self.locals and any(self.locals['dones']):
             env = self.locals['env'].envs[0]
             info = self.locals['infos'][0]
@@ -53,20 +41,23 @@ class RewardLoggingCallback(BaseCallback):
             total_irrigation = info.get('total_irrigation', float('nan'))
 
             if not np.isnan(dry_yield) and not np.isnan(total_irrigation):
-                print(f"Episode ended. Dry yield: {dry_yield}, Total irrigation: {total_irrigation}")
                 self.yields.append(dry_yield)
                 self.irrigations.append(total_irrigation)
 
-            self.episode_rewards.append(self.current_rewards)
-            self.episode_schedules.append(env.unwrapped.irrigation_schedule)
+            # Calculate mean reward for the current episode
+            mean_reward = np.mean(self.current_episode_rewards)
+            self.episode_rewards.append(mean_reward)
 
-            if self.current_rewards > self.highest_reward:
-                self.highest_reward = self.current_rewards
+            # Log the mean reward to Comet.ml
+            self.experiment.log_metric("PPO_mean_reward", mean_reward, step=len(self.episode_rewards))
+
+            # Check if this is the best episode
+            if mean_reward > self.highest_reward:
+                self.highest_reward = mean_reward
                 self.best_schedule = env.unwrapped.irrigation_schedule.copy()
 
-            self.experiment.log_metric("reward", self.current_rewards, step=len(self.episode_rewards))
-
-            self.current_rewards = 0
+            # Reset for the next episode
+            self.current_episode_rewards = []
             env.unwrapped.irrigation_schedule = []
 
         return True
@@ -74,7 +65,6 @@ class RewardLoggingCallback(BaseCallback):
     def _on_training_end(self):
         self.plot_rewards()
         self.plot_irrigation_schedule()
-        self.plot_loss()
 
         if self.yields and self.irrigations:
             mean_yield = np.mean(self.yields)
@@ -83,44 +73,28 @@ class RewardLoggingCallback(BaseCallback):
             mean_yield = float('nan')
             mean_irrigation = float('nan')
 
-        self.experiment.log_metric("mean_yield", mean_yield)
-        self.experiment.log_metric("mean_irrigation", mean_irrigation)
-        print(f"Mean Yield: {mean_yield}, Mean Irrigation: {mean_irrigation}")
+        # Log additional metrics to Comet.ml
+        self.experiment.log_metric("PPO_mean_yield", mean_yield)
+        self.experiment.log_metric("PPO_mean_irrigation", mean_irrigation)
 
     def plot_rewards(self):
         plt.figure(figsize=(10, 5))
         plt.plot(range(len(self.episode_rewards)), self.episode_rewards)
         plt.xlabel('Episodes')
-        plt.ylabel('Total Reward')
-        plt.title('Total Reward per Episode')
-        plt.savefig('reward_plot.png')
-        print("Reward plot saved as reward_plot.png")
+        plt.ylabel('Mean Reward')
+        plt.title('Mean Reward per Episode (PPO)')
+        plt.savefig('ppo_reward_plot.png')
 
     def plot_irrigation_schedule(self):
         if len(self.best_schedule) > 0:
             timesteps, actions = zip(*self.best_schedule)
             plt.figure(figsize=(10, 5))
-            plt.plot(timesteps, actions, label='Best Episode Irrigation Schedule')
+            plt.plot(timesteps, actions, label='Best Episode Irrigation Schedule (PPO)')
             plt.xlabel('Timestep (Day)')
             plt.ylabel('Irrigation Action (0 or 25)')
-            plt.title('Irrigation Schedule for Highest Reward Episode')
+            plt.title('Irrigation Schedule for Highest Reward Episode (PPO)')
             plt.legend()
-            plt.savefig('best_irrigation_schedule_plot.png')
-            print("Irrigation schedule plot saved as best_irrigation_schedule_plot.png")
-        else:
-            print("No irrigation schedule found for any episode.")
-
-    def plot_loss(self):
-        if len(self.losses) > 0:
-            plt.figure(figsize=(10, 5))
-            plt.plot(range(len(self.losses)), self.losses)
-            plt.xlabel('Steps')
-            plt.ylabel('Loss')
-            plt.title('Training Loss over Time')
-            plt.savefig('loss_plot.png')
-            print("Loss plot saved as loss_plot.png")
-        else:
-            print("No loss values found during training.")
+            plt.savefig('ppo_best_irrigation_schedule_plot.png')
 
 # Initialize Comet.ml experiment in offline mode
 experiment = OfflineExperiment(
@@ -135,36 +109,18 @@ train_env = DummyVecEnv([lambda: Monitor(Maize(mode='train', year1=1982, year2=2
 # Custom reward logging callback
 reward_logging_callback = RewardLoggingCallback(experiment)
 
-# Training parameters (shared among algorithms)
-train_timesteps = 50000
+# Training parameters
+train_timesteps = 10
 
-# Define algorithms and hyperparameters with exploration encouragement
-algorithms = {
-    "PPO": PPO(
-        "MlpPolicy", train_env, verbose=1,
-        learning_rate=5e-4,
-        n_steps=1024,
-        batch_size=64,
-        n_epochs=20,
-        ent_coef=0.01
-    ),
-    # "DQN": DQN(
-    #     "MlpPolicy", train_env, verbose=1,
-    #     learning_rate=1e-3,
-    #     buffer_size=100000,
-    #     batch_size=64,
-    #     target_update_interval=1000,
-    #     exploration_initial_eps=1.0,  # Increase for more initial exploration
-    #     exploration_final_eps=0.05,
-    #     exploration_fraction=0.3  # Slower decay, exploration for a longer period
-    # ),
-    # "ARS": ARS(
-    #     "MlpPolicy", train_env, verbose=1,
-    #     n_delta=128,
-    #     n_top=16,
-    #     delta_std=0.2
-    # ),
-}
+# Define PPO algorithm with hyperparameters
+ppo_model = PPO(
+    "MlpPolicy", train_env, verbose=1,
+    learning_rate=5e-4,
+    n_steps=1024,
+    batch_size=64,
+    n_epochs=20,
+    ent_coef=0.01
+)
 
 # Define the Random Agent
 class RandomAgent:
@@ -175,121 +131,121 @@ class RandomAgent:
         action = self.action_space.sample()
         return [action], state
 
+# Function to evaluate agents with debugging
+def evaluate_agent(agent, env, n_eval_episodes=10, agent_name="RandomAgent"):
+    total_rewards = []
+    yields = []
+    irrigations = []
+
+    with open(f"{agent_name}_evaluation_debug.txt", "w") as log_file:
+        for episode in range(n_eval_episodes):
+            obs, done = env.reset(), False
+            episode_rewards = []  # Track rewards per step
+            total_irrigation = 0
+
+            log_file.write(f"\nEpisode {episode+1}:\n")
+            step_count = 0
+
+            while not done:
+                # Get the action from the agent
+                action, _states = agent.predict(obs)
+
+                # Take a step in the environment
+                obs, reward, done, info = env.step(action)
+
+                # Accumulate rewards and irrigation
+                episode_rewards.append(reward)
+                total_irrigation += info[0].get('total_irrigation', 0)
+                dry_yield = info[0].get('dry_yield', 0)
+
+                # Log action, irrigation, yield, and cumulative reward after each step
+                log_file.write(f"Step {step_count}: Action: {action}, Reward: {reward}, "
+                               f"Dry Yield: {dry_yield}, Total Irrigation: {total_irrigation}\n")
+
+                step_count += 1
+
+            # Store the mean reward, yield, and irrigation for the episode
+            total_rewards.append(np.mean(episode_rewards))
+            yields.append(dry_yield)
+            irrigations.append(total_irrigation)
+
+            # Log final values for the episode
+            log_file.write(f"End of Episode {episode+1}: Mean Reward: {np.mean(episode_rewards)}, "
+                           f"Final Yield: {dry_yield}, Total Irrigation: {total_irrigation}\n")
+
+    # Compute and return the mean and standard deviation of the rewards
+    mean_reward = np.mean(total_rewards)
+    std_reward = np.std(total_rewards)
+    mean_yield = np.mean(yields)
+    mean_irrigation = np.mean(irrigations)
+
+    return mean_reward, std_reward, mean_yield, mean_irrigation
+
+# Train PPO Model
+print("Training PPO Model...")
+ppo_model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
+
 # Initialize the random agent
 random_agent = RandomAgent(train_env.action_space)
 
-mean_rewards = []
-std_rewards = []
-mean_yields = []
-mean_irrigations = []
-agents = []
-
-for name, model in algorithms.items():
-    print(f"Training {name} with enhanced exploration...")
-    model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
-    
-    eval_env = DummyVecEnv([lambda: Monitor(Maize(mode='eval', year1=2003, year2=2018))])
-    
-    print(f"Evaluating {name}...")
-    mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=1000, return_episode_rewards=False, deterministic=False)
-    
-    # Calculate mean yield and irrigation over evaluation episodes
-    yields = []
-    irrigations = []
-    
-    for _ in range(100):  # Assuming you want to evaluate over 10 episodes
-        obs, done = eval_env.reset(), False
-        while not done:
-            action, _states = model.predict(obs, deterministic=True)
-            obs, reward, done, info = eval_env.step(action)
-            if done:
-                dry_yield = info[0].get('dry_yield', float('nan'))
-                total_irrigation = info[0].get('total_irrigation', float('nan'))
-                yields.append(dry_yield)
-                irrigations.append(total_irrigation)
-                print(f"Evaluation Episode Ended. Dry yield: {dry_yield}, Total irrigation: {total_irrigation}")
-
-    mean_yield = np.mean(yields) if yields else float('nan')
-    mean_irrigation = np.mean(irrigations) if irrigations else float('nan')
-
-    experiment.log_metric(f"{name}_mean_reward", mean_reward)
-    experiment.log_metric(f"{name}_std_reward", std_reward)
-    experiment.log_metric(f"{name}_mean_yield", mean_yield)
-    experiment.log_metric(f"{name}_mean_irrigation", mean_irrigation)
-    
-    mean_rewards.append(mean_reward)
-    std_rewards.append(std_reward)
-    mean_yields.append(mean_yield)
-    mean_irrigations.append(mean_irrigation)
-    agents.append(name)
+# Evaluate the PPO Model
+print("Evaluating PPO Model with Debugging...")
+ppo_mean_reward, ppo_std_reward, ppo_mean_yield, ppo_mean_irrigation = evaluate_agent(ppo_model, train_env, n_eval_episodes=100, agent_name="PPO")
 
 # Evaluate the Random Agent
-print("Evaluating Random Agent...")
-mean_reward, std_reward = evaluate_policy(random_agent, eval_env, n_eval_episodes=1000, return_episode_rewards=False)
+print("Evaluating Random Agent with Debugging...")
+random_mean_reward, random_std_reward, random_mean_yield, random_mean_irrigation = evaluate_agent(random_agent, train_env, n_eval_episodes=100, agent_name="RandomAgent")
 
-# Repeating the yield and irrigation logging for the Random Agent
-yields = []
-irrigations = []
+# Log the results to Comet.ml
+experiment.log_metric(f"PPO_mean_reward", ppo_mean_reward)
+experiment.log_metric(f"PPO_std_reward", ppo_std_reward)
+experiment.log_metric(f"PPO_mean_yield", ppo_mean_yield)
+experiment.log_metric(f"PPO_mean_irrigation", ppo_mean_irrigation)
 
-for _ in range(100):  # Assuming you want to evaluate over 10 episodes
-    obs, done = eval_env.reset(), False
-    while not done:
-        action, _states = random_agent.predict(obs)
-        obs, reward, done, info = eval_env.step(action)
-        if done:
-            dry_yield = info[0].get('dry_yield', float('nan'))
-            total_irrigation = info[0].get('total_irrigation', float('nan'))
-            yields.append(dry_yield)
-            irrigations.append(total_irrigation)
-            print(f"Evaluation Episode Ended. Dry yield: {dry_yield}, Total irrigation: {total_irrigation}")
+experiment.log_metric(f"RandomAgent_mean_reward", random_mean_reward)
+experiment.log_metric(f"RandomAgent_std_reward", random_std_reward)
+experiment.log_metric(f"RandomAgent_mean_yield", random_mean_yield)
+experiment.log_metric(f"RandomAgent_mean_irrigation", random_mean_irrigation)
 
-mean_yield = np.mean(yields) if yields else float('nan')
-mean_irrigation = np.mean(irrigations) if irrigations else float('nan')
-
-experiment.log_metric(f"RandomAgent_mean_reward", mean_reward)
-experiment.log_metric(f"RandomAgent_std_reward", std_reward)
-experiment.log_metric(f"RandomAgent_mean_yield", mean_yield)
-experiment.log_metric(f"RandomAgent_mean_irrigation", mean_irrigation)
-
-mean_rewards.append(mean_reward)
-std_rewards.append(std_reward)
-mean_yields.append(mean_yield)
-mean_irrigations.append(mean_irrigation)
-agents.append("RandomAgent")
+# Print the results
+print(f"PPO - Mean Reward: {ppo_mean_reward}, Std Dev: {ppo_std_reward}, Mean Yield: {ppo_mean_yield}, Mean Irrigation: {ppo_mean_irrigation}")
+print(f"RandomAgent - Mean Reward: {random_mean_reward}, Std Dev: {random_std_reward}, Mean Yield: {random_mean_yield}, Mean Irrigation: {random_mean_irrigation}")
 
 # End Comet.ml experiment
 experiment.end()
 
-# Print final evaluation results
-for i, agent in enumerate(agents):
-    print(f"{agent} - Mean Reward: {mean_rewards[i]}, Std Dev: {std_rewards[i]}, Mean Yield: {mean_yields[i]}, Mean Irrigation: {mean_irrigations[i]}")
-
 # Plot comparison of Mean Rewards
 plt.figure(figsize=(12, 7))
-plt.bar(agents, mean_rewards, yerr=std_rewards, capsize=10, color='blue')
+agents = ['PPO', 'RandomAgent']
+mean_rewards = [ppo_mean_reward, random_mean_reward]
+std_rewards = [ppo_std_reward, random_std_reward]
+
+plt.bar(agents, mean_rewards, yerr=std_rewards, capsize=10, color=['green', 'blue'])
 plt.ylabel('Mean Reward')
-plt.title('Comparison of Mean Reward across Algorithms')
+plt.title('Comparison of Mean Rewards (PPO vs Random Agent)')
 plt.grid(True)
-plt.savefig('algorithm_comparison_reward.png')
-print("Reward comparison plot saved as algorithm_comparison_reward.png")
+plt.savefig('ppo_vs_random_reward.png')
 plt.show()
 
 # Plot comparison of Mean Yields
 plt.figure(figsize=(12, 7))
-plt.bar(agents, mean_yields, yerr=np.std(mean_yields), capsize=10, color='green')
+mean_yields = [ppo_mean_yield, random_mean_yield]
+
+plt.bar(agents, mean_yields, capsize=10, color=['green', 'blue'])
 plt.ylabel('Mean Yield (tonne/ha)')
-plt.title('Comparison of Mean Yield across Algorithms')
+plt.title('Comparison of Mean Yields (PPO vs Random Agent)')
 plt.grid(True)
-plt.savefig('algorithm_comparison_yield.png')
-print("Yield comparison plot saved as algorithm_comparison_yield.png")
+plt.savefig('ppo_vs_random_yield.png')
 plt.show()
 
 # Plot comparison of Mean Irrigation
 plt.figure(figsize=(12, 7))
-plt.bar(agents, mean_irrigations, yerr=np.std(mean_irrigations), capsize=10, color='orange')
+mean_irrigations = [ppo_mean_irrigation, random_mean_irrigation]
+
+plt.bar(agents, mean_irrigations, capsize=10, color=['green', 'blue'])
 plt.ylabel('Mean Irrigation (mm)')
-plt.title('Comparison of Mean Irrigation across Algorithms')
+plt.title('Comparison of Mean Irrigation (PPO vs Random Agent)')
 plt.grid(True)
-plt.savefig('algorithm_comparison_irrigation.png')
-print("Irrigation comparison plot saved as algorithm_comparison_irrigation.png")
+plt.savefig('ppo_vs_random_irrigation.png')
 plt.show()
+

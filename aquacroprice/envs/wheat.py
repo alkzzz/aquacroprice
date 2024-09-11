@@ -179,13 +179,14 @@ class Wheat(gym.Env):
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
 
-            reward = ((dry_yield + 1) ** 3) - ((total_irrigation + 1) * 10)
-            info['dry_yield'] = dry_yield
-            info['total_irrigation'] = total_irrigation
+            reward = dry_yield ** 2
 
             print(f"Dry Yield: {dry_yield}")
             print(f"Total Irrigation: {total_irrigation}")
             print(f"Reward: {reward}")
+            
+            info['dry_yield'] = dry_yield
+            info['total_irrigation'] = total_irrigation
 
             # Update the SMT values for the next episode based on the action
             self.current_smt = np.array(action)
