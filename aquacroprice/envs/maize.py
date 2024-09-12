@@ -87,6 +87,7 @@ class Maize(gym.Env):
         self.irr_sched = []
         self.total_irrigation_applied = 0
         self.day_counter = 0  # Reset day counter
+        self.total_irrigation_applied = 0
 
         # Initialize the AquaCrop model
         self.model = AquaCropModel(
@@ -100,9 +101,6 @@ class Maize(gym.Env):
         )
 
         self.model.run_model()
-
-        self.total_irrigation_applied = 0
-        self.cumulative_reward = 0
 
         obs = self._get_obs()
         info = dict()
@@ -163,10 +161,12 @@ class Maize(gym.Env):
         self.log(f"Action taken: {action}, Depth: {depth}, Total Irrigation: {self.total_irrigation_applied}")
 
         # Apply penalty for irrigation once total irrigation exceeds 300 mm
+        reward = 0  # Initialize reward for this step
+        
         if previous_total_irrigation >= 400 and depth > 0:
             # Penalize for irrigation after exceeding 300 mm
-            self.cumulative_reward -= depth
-            self.log(f"Penalty applied for exceeding 300 mm: -{depth}. Cumulative reward: {self.cumulative_reward}")
+            reward -= depth  # Apply penalty to the current step's reward
+            self.log(f"Penalty applied for exceeding 300 mm: -{depth}. Step reward: {reward}")
 
         # If the season is finished, calculate the final reward
         if terminated:
@@ -174,22 +174,20 @@ class Maize(gym.Env):
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
 
             # Add yield-based reward separately from penalties
-            yield_reward = dry_yield ** 2
+            yield_reward = (dry_yield + 1) ** 2
             
-            if total_irrigation < 400:
-                self.cumulative_reward += (yield_reward - (400 - total_irrigation))
-            else:
-                self.cumulative_reward += yield_reward
-                
+            reward += yield_reward
+
             self.log(f"Dry Yield: {dry_yield}, Total Irrigation: {total_irrigation}")
-            self.log(f"Yield Reward: {yield_reward}. Final cumulative reward: {self.cumulative_reward}")
+            self.log(f"Yield Reward: {yield_reward}. Final step reward: {reward}")
 
             info = {'dry_yield': dry_yield, 'total_irrigation': total_irrigation}
         else:
             info = {'dry_yield': 0.0, 'total_irrigation': 0.0}
 
-        # Return the next observation, the cumulative reward, and whether the episode is done
-        return next_obs, self.cumulative_reward, terminated, False, info
+        # Return the next observation, the reward for this step, and whether the episode is done
+        return next_obs, reward, terminated, False, info
+
 
     def close(self):
         # Close the log file when the environment is closed
