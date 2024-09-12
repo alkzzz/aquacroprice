@@ -167,7 +167,7 @@ class Maize(gym.Env):
         biomass = self.model._init_cond.biomass
         
         if biomass_ns > 0:
-            print(f"Delta Biomass:" {1 / (1 + (biomass_ns - biomass))})
+            print(f"Delta Biomass: {1 / (1 + (biomass_ns - biomass))}")
             reward += 1 / (1 + (biomass_ns - biomass))
         
         if previous_total_irrigation >= 400 and depth > 0:
