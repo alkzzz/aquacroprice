@@ -163,6 +163,13 @@ class Maize(gym.Env):
         # Apply penalty for irrigation once total irrigation exceeds 300 mm
         reward = 0  # Initialize reward for this step
         
+        biomass_ns = self.model._init_cond.biomass_ns
+        biomass = self.model._init_cond.biomass
+        
+        if biomass_ns > 0:
+            print(f"Delta Biomass:" {1 / (1 + (biomass_ns - biomass))})
+            reward += 1 / (1 + (biomass_ns - biomass))
+        
         if previous_total_irrigation >= 400 and depth > 0:
             # Penalize for irrigation after exceeding 300 mm
             reward -= depth  # Apply penalty to the current step's reward
