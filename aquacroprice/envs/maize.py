@@ -46,7 +46,7 @@ class Maize(gym.Env):
             self.soil = soil
 
         # Define observation space: Includes weather-related observations
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(9,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(27,), dtype=np.float32)
 
         self.action_depths = [0, 25]
         self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space
@@ -88,6 +88,7 @@ class Maize(gym.Env):
         self.total_irrigation_applied = 0
         self.day_counter = 0  # Reset day counter
         self.total_irrigation_applied = 0
+        self.cumulative_reward = 0
 
         # Initialize the AquaCrop model
         self.model = AquaCropModel(
@@ -111,35 +112,41 @@ class Maize(gym.Env):
     def _get_obs(self):
         cond = self.model._init_cond
 
-        total_precipitation_last_7_days = self._get_total_precipitation_last_7_days()
-        cum_min_temp_last_7_days = self._get_cumulative_temp_last_7_days("MinTemp")
-        cum_max_temp_last_7_days = self._get_cumulative_temp_last_7_days("MaxTemp")
+        # Get daily values for the last 7 days for each variable
+        precip_last_7_days = self._get_last_7_days_values('Precipitation')
+        min_temp_last_7_days = self._get_last_7_days_values('MinTemp')
+        max_temp_last_7_days = self._get_last_7_days_values('MaxTemp')
 
+        # Combine the weather data into one array
+        weather_obs = np.concatenate([precip_last_7_days, min_temp_last_7_days, max_temp_last_7_days])
+
+        # Construct the observation by combining crop conditions and weather data
         obs = np.array([
             cond.age_days,
             cond.canopy_cover,
             cond.biomass,
             cond.z_root,
             cond.depletion,
-            cond.taw,
-            total_precipitation_last_7_days,
-            cum_min_temp_last_7_days,
-            cum_max_temp_last_7_days,
+            cond.taw
         ], dtype=np.float32)
+
+        # Add the weather data to the observation
+        obs = np.concatenate([obs, weather_obs])
 
         return obs
 
-    def _get_total_precipitation_last_7_days(self):
+    def _get_last_7_days_values(self, column):
+        """Helper method to get the last 7 days of data for a specific column."""
         current_day = self.model._clock_struct.time_step_counter
-        last_7_days = self.wdf.iloc[max(0, current_day - 7):current_day]
-        total_precipitation = last_7_days['Precipitation'].sum()
-        return total_precipitation
+        last_7_days = self.wdf.iloc[max(0, current_day - 7):current_day][column]
+        
+        # If fewer than 7 days of data exist, pad the start with zeros
+        if len(last_7_days) < 7:
+            padding = np.zeros(7 - len(last_7_days))
+            last_7_days = np.concatenate([padding, last_7_days])
+        
+        return last_7_days
 
-    def _get_cumulative_temp_last_7_days(self, temp_col):
-        current_day = self.model._clock_struct.time_step_counter
-        last_7_days = self.wdf.iloc[max(0, current_day - 7):current_day]
-        cumulative_temp = last_7_days[temp_col].sum()
-        return cumulative_temp
 
     # Example code for step function with penalty system and random agent info
     def step(self, action):
@@ -156,44 +163,62 @@ class Maize(gym.Env):
         self.irrigation_schedule.append((current_timestep, depth))
 
         # Update the total irrigation applied so far
-        previous_total_irrigation = self.total_irrigation_applied
         self.total_irrigation_applied += depth
-        self.log(f"Action taken: {action}, Depth: {depth}, Total Irrigation: {self.total_irrigation_applied}")
+        current_total_irrigation = self.total_irrigation_applied
+        # print(f"Total Irrigation Applied: {current_total_irrigation}")
 
-        # Apply penalty for irrigation once total irrigation exceeds 300 mm
-        reward = 0  # Initialize reward for this step
-        
+        # Initialize reward for this step
+        step_reward = 0  
+
+        # Biomass reward
         biomass_ns = self.model._init_cond.biomass_ns
         biomass = self.model._init_cond.biomass
-        
         if biomass_ns > 0:
-            print(f"Delta Biomass: {1 / (1 + (biomass_ns - biomass))}")
-            reward += 1 / (1 + (biomass_ns - biomass))
-        
-        if previous_total_irrigation >= 400 and depth > 0:
-            # Penalize for irrigation after exceeding 300 mm
-            reward -= depth  # Apply penalty to the current step's reward
-            self.log(f"Penalty applied for exceeding 300 mm: -{depth}. Step reward: {reward}")
+            biomass_reward = 1 / (1 + (biomass_ns - biomass))
+            step_reward += biomass_reward
+            # print(f"Biomass NS: {biomass_ns}, Biomass: {biomass}, Biomass Reward: {biomass_reward}")
+
+        # Penalty for excessive irrigation
+        # print(f"Current Irrigation: {current_total_irrigation}")
+        if current_total_irrigation >= 300 and depth > 0:
+            penalty = depth / 10
+            step_reward -= penalty
+            # print(f"Penalty for Irrigation (Total Irrigation {current_total_irrigation} mm): -{penalty}, Current Step Reward: {step_reward}")
+
+        # Accumulate the reward for the final step
+        if not hasattr(self, 'cumulative_reward'):
+            self.cumulative_reward = 0  # Initialize cumulative reward
+
+        self.cumulative_reward += step_reward  # Add current step reward to cumulative reward
 
         # If the season is finished, calculate the final reward
         if terminated:
             dry_yield = self.model._outputs.final_stats['Dry yield (tonne/ha)'].mean()
             total_irrigation = self.model._outputs.final_stats['Seasonal irrigation (mm)'].mean()
-
+            
+            print(f"Current Cumulative Reward: {self.cumulative_reward}")
             # Add yield-based reward separately from penalties
             yield_reward = (dry_yield + 1) ** 2
-            
-            reward += yield_reward
+            self.cumulative_reward += yield_reward  # Add final yield reward to cumulative reward
 
-            self.log(f"Dry Yield: {dry_yield}, Total Irrigation: {total_irrigation}")
-            self.log(f"Yield Reward: {yield_reward}. Final step reward: {reward}")
+            print(f"Dry Yield: {dry_yield}, Total Irrigation: {total_irrigation}")
+            print(f"Final Cumulative Reward: {self.cumulative_reward}")
 
             info = {'dry_yield': dry_yield, 'total_irrigation': total_irrigation}
-        else:
-            info = {'dry_yield': 0.0, 'total_irrigation': 0.0}
 
-        # Return the next observation, the reward for this step, and whether the episode is done
-        return next_obs, reward, terminated, False, info
+            # Reset cumulative reward for the next episode
+            total_reward = self.cumulative_reward
+            self.cumulative_reward = 0  # Reset for the next episode
+        else:
+            info = {'dry_yield': 0.0, 'total_irrigation': 0}
+            total_reward = step_reward
+
+        # Return the next observation, the step reward (not cumulative), and whether the episode is done
+        return next_obs, total_reward, terminated, False, info
+
+
+
+
 
 
     def close(self):
