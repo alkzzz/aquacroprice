@@ -180,7 +180,7 @@ class Maize(gym.Env):
 
         # Penalty for excessive irrigation
         # print(f"Current Irrigation: {current_total_irrigation}")
-        if current_total_irrigation >= 300 and depth > 0:
+        if current_total_irrigation >= 200 and depth > 0:
             penalty = depth / 10
             step_reward -= penalty
             # print(f"Penalty for Irrigation (Total Irrigation {current_total_irrigation} mm): -{penalty}, Current Step Reward: {step_reward}")
