@@ -181,7 +181,7 @@ class Maize(gym.Env):
         # Penalty for excessive irrigation
         # print(f"Current Irrigation: {current_total_irrigation}")
         if current_total_irrigation >= 200 and depth > 0:
-            penalty = depth / 10
+            penalty = current_total_irrigation / 10
             step_reward -= penalty
             # print(f"Penalty for Irrigation (Total Irrigation {current_total_irrigation} mm): -{penalty}, Current Step Reward: {step_reward}")
 
@@ -198,7 +198,7 @@ class Maize(gym.Env):
             
             print(f"Current Cumulative Reward: {self.cumulative_reward}")
             # Add yield-based reward separately from penalties
-            yield_reward = (dry_yield + 1) ** 2
+            yield_reward = (2 * (dry_yield ** 3)) - (total_irrigation * 10)
             self.cumulative_reward += yield_reward  # Add final yield reward to cumulative reward
 
             print(f"Dry Yield: {dry_yield}, Total Irrigation: {total_irrigation}")
@@ -215,11 +215,6 @@ class Maize(gym.Env):
 
         # Return the next observation, the step reward (not cumulative), and whether the episode is done
         return next_obs, total_reward, terminated, False, info
-
-
-
-
-
 
     def close(self):
         # Close the log file when the environment is closed
