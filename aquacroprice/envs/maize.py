@@ -170,24 +170,10 @@ class Maize(gym.Env):
         # Initialize reward for this step
         step_reward = 0  
 
-        # Biomass reward
-        biomass_ns = self.model._init_cond.biomass_ns
-        biomass = self.model._init_cond.biomass
-        if biomass_ns > 0:
-            biomass_reward = 1 / (1 + (biomass_ns - biomass))
-            step_reward += biomass_reward
-            # print(f"Biomass NS: {biomass_ns}, Biomass: {biomass}, Biomass Reward: {biomass_reward}")
-
-        # Penalty for excessive irrigation
-        # print(f"Current Irrigation: {current_total_irrigation}")
-        if current_total_irrigation >= 200 and depth > 0:
-            penalty = current_total_irrigation / 10
+        # Penalty for irrigation action
+        if depth > 0:
+            penalty = current_total_irrigation / 5
             step_reward -= penalty
-            # print(f"Penalty for Irrigation (Total Irrigation {current_total_irrigation} mm): -{penalty}, Current Step Reward: {step_reward}")
-
-        # Accumulate the reward for the final step
-        if not hasattr(self, 'cumulative_reward'):
-            self.cumulative_reward = 0  # Initialize cumulative reward
 
         self.cumulative_reward += step_reward  # Add current step reward to cumulative reward
 
@@ -198,7 +184,7 @@ class Maize(gym.Env):
             
             print(f"Current Cumulative Reward: {self.cumulative_reward}")
             # Add yield-based reward separately from penalties
-            yield_reward = (2 * (dry_yield ** 3)) - (total_irrigation * 10)
+            yield_reward = dry_yield ** 3
             self.cumulative_reward += yield_reward  # Add final yield reward to cumulative reward
 
             print(f"Dry Yield: {dry_yield}, Total Irrigation: {total_irrigation}")
