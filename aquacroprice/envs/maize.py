@@ -148,7 +148,6 @@ class Maize(gym.Env):
         return last_7_days
 
 
-    # Example code for step function with penalty system and random agent info
     def step(self, action):
         # Apply irrigation based on action (either 25 mm or 0 mm)
         depth = self.action_depths[int(action)]
@@ -172,7 +171,7 @@ class Maize(gym.Env):
 
         # Penalty for irrigation action
         if depth > 0:
-            penalty = current_total_irrigation / 5
+            penalty = current_total_irrigation
             step_reward -= penalty
 
         self.cumulative_reward += step_reward  # Add current step reward to cumulative reward
@@ -184,7 +183,7 @@ class Maize(gym.Env):
             
             print(f"Current Cumulative Reward: {self.cumulative_reward}")
             # Add yield-based reward separately from penalties
-            yield_reward = dry_yield ** 3
+            yield_reward = dry_yield ** 4
             self.cumulative_reward += yield_reward  # Add final yield reward to cumulative reward
 
             print(f"Dry Yield: {dry_yield}, Total Irrigation: {total_irrigation}")
