@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from comet_ml import OfflineExperiment
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, DQN
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
@@ -34,7 +34,7 @@ class RewardLoggingCallback(BaseCallback):
             self.episode_rewards.append(total_reward)
             
             # Log mean reward for the episode in Comet.ml
-            self.experiment.log_metric("PPO_episode_reward", total_reward)
+            self.experiment.log_metric("episode_reward", total_reward)
 
             # Reset for the next episode
             self.current_episode_rewards = []
@@ -48,8 +48,8 @@ class RewardLoggingCallback(BaseCallback):
             final_std_reward = np.std(self.episode_rewards)
 
             # Log final values to Comet.ml
-            self.experiment.log_metric("PPO_final_mean_reward", final_mean_reward)
-            self.experiment.log_metric("PPO_final_std_reward", final_std_reward)
+            self.experiment.log_metric("final_mean_reward", final_mean_reward)
+            self.experiment.log_metric("final_std_reward", final_std_reward)
 
         # Plot rewards
         self.plot_rewards()
@@ -59,8 +59,8 @@ class RewardLoggingCallback(BaseCallback):
         plt.plot(range(len(self.episode_rewards)), self.episode_rewards)
         plt.xlabel('Episodes')
         plt.ylabel('Total Reward')
-        plt.title('Total Reward per Episode (PPO)')
-        plt.savefig('ppo_reward_plot.png')
+        plt.title('Total Reward per Episode')
+        plt.savefig('reward_plot.png')
 
 # Initialize Comet.ml experiment in offline mode
 experiment = OfflineExperiment(
@@ -86,6 +86,12 @@ ppo_model = PPO(
     batch_size=64,
     n_epochs=20,
     ent_coef=0.01,
+    tensorboard_log="./tensorboard/"
+)
+
+# Define DQN algorithm with standard hyperparameters
+dqn_model = DQN(
+    "MlpPolicy", train_env, verbose=1,
     tensorboard_log="./tensorboard/"
 )
 
@@ -128,6 +134,10 @@ def evaluate_agent(agent, env, n_eval_episodes=100, agent_name="RandomAgent"):
 print("Training PPO Model...")
 ppo_model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
 
+# Train DQN Model
+print("Training DQN Model...")
+dqn_model.learn(total_timesteps=train_timesteps, callback=reward_logging_callback)
+
 # Initialize the random agent
 class RandomAgent:
     def __init__(self, action_space):
@@ -143,15 +153,24 @@ random_agent = RandomAgent(train_env.action_space)
 print("Evaluating PPO Model with Debugging...")
 ppo_mean_reward, ppo_std_reward, ppo_mean_yield, ppo_mean_irrigation = evaluate_agent(ppo_model, train_env, n_eval_episodes=100, agent_name="PPO")
 
+# Evaluate the DQN Model
+print("Evaluating DQN Model with Debugging...")
+dqn_mean_reward, dqn_std_reward, dqn_mean_yield, dqn_mean_irrigation = evaluate_agent(dqn_model, train_env, n_eval_episodes=100, agent_name="DQN")
+
 # Evaluate the Random Agent
 print("Evaluating Random Agent with Debugging...")
 random_mean_reward, random_std_reward, random_mean_yield, random_mean_irrigation = evaluate_agent(random_agent, train_env, n_eval_episodes=100, agent_name="RandomAgent")
 
-# Log the final values for PPO and RandomAgent
+# Log the final values for PPO, DQN, and RandomAgent
 experiment.log_metric(f"PPO_final_mean_reward", ppo_mean_reward)
 experiment.log_metric(f"PPO_final_std_reward", ppo_std_reward)
 experiment.log_metric(f"PPO_final_mean_yield", ppo_mean_yield)
 experiment.log_metric(f"PPO_final_mean_irrigation", ppo_mean_irrigation)
+
+experiment.log_metric(f"DQN_final_mean_reward", dqn_mean_reward)
+experiment.log_metric(f"DQN_final_std_reward", dqn_std_reward)
+experiment.log_metric(f"DQN_final_mean_yield", dqn_mean_yield)
+experiment.log_metric(f"DQN_final_mean_irrigation", dqn_mean_irrigation)
 
 experiment.log_metric(f"RandomAgent_final_mean_reward", random_mean_reward)
 experiment.log_metric(f"RandomAgent_final_std_reward", random_std_reward)
@@ -163,35 +182,35 @@ experiment.end()
 
 # Plot comparison of Mean Rewards
 plt.figure(figsize=(12, 7))
-agents = ['PPO', 'RandomAgent']
-mean_rewards = [ppo_mean_reward, random_mean_reward]
-std_rewards = [ppo_std_reward, random_std_reward]
+agents = ['PPO', 'DQN', 'RandomAgent']
+mean_rewards = [ppo_mean_reward, dqn_mean_reward, random_mean_reward]
+std_rewards = [ppo_std_reward, dqn_std_reward, random_std_reward]
 
-plt.bar(agents, mean_rewards, yerr=std_rewards, capsize=10, color=['green', 'blue'])
+plt.bar(agents, mean_rewards, yerr=std_rewards, capsize=10, color=['green', 'orange', 'blue'])
 plt.ylabel('Mean Reward')
-plt.title('Comparison of Total Rewards (PPO vs Random Agent)')
+plt.title('Comparison of Total Rewards (PPO, DQN, Random Agent)')
 plt.grid(True)
-plt.savefig('ppo_vs_random_reward.png')
+plt.savefig('ppo_vs_dqn_vs_random_reward.png')
 plt.show()
 
 # Plot comparison of Mean Yields
 plt.figure(figsize=(12, 7))
-mean_yields = [ppo_mean_yield, random_mean_yield]
+mean_yields = [ppo_mean_yield, dqn_mean_yield, random_mean_yield]
 
-plt.bar(agents, mean_yields, capsize=10, color=['green', 'blue'])
+plt.bar(agents, mean_yields, capsize=10, color=['green', 'orange', 'blue'])
 plt.ylabel('Mean Yield (tonne/ha)')
-plt.title('Comparison of Mean Yields (PPO vs Random Agent)')
+plt.title('Comparison of Mean Yields (PPO, DQN, Random Agent)')
 plt.grid(True)
-plt.savefig('ppo_vs_random_yield.png')
+plt.savefig('ppo_vs_dqn_vs_random_yield.png')
 plt.show()
 
 # Plot comparison of Mean Irrigation
 plt.figure(figsize=(12, 7))
-mean_irrigations = [ppo_mean_irrigation, random_mean_irrigation]
+mean_irrigations = [ppo_mean_irrigation, dqn_mean_irrigation, random_mean_irrigation]
 
-plt.bar(agents, mean_irrigations, capsize=10, color=['green', 'blue'])
+plt.bar(agents, mean_irrigations, capsize=10, color=['green', 'orange', 'blue'])
 plt.ylabel('Mean Irrigation (mm)')
-plt.title('Comparison of Mean Irrigation (PPO vs Random Agent)')
+plt.title('Comparison of Mean Irrigation (PPO, DQN, Random Agent)')
 plt.grid(True)
-plt.savefig('ppo_vs_random_irrigation.png')
+plt.savefig('ppo_vs_dqn_vs_random_irrigation.png')
 plt.show()
