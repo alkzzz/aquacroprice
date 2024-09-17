@@ -46,7 +46,7 @@ class Maize(gym.Env):
             self.soil = soil
 
         # Define observation space: Includes weather-related observations
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(27,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(26,), dtype=np.float32)
 
         self.action_depths = [0, 25]
         self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space
@@ -125,7 +125,6 @@ class Maize(gym.Env):
             cond.age_days,
             cond.canopy_cover,
             cond.biomass,
-            cond.z_root,
             cond.depletion,
             cond.taw
         ], dtype=np.float32)
