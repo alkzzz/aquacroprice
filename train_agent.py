@@ -67,33 +67,36 @@ train_env = VecNormalize(train_env, norm_obs=True, norm_reward=True)
 reward_logging_callback = RewardLoggingCallback(experiment)
 
 # Training parameters
-train_timesteps = 50000  # Adjust the number of timesteps as needed
+train_timesteps = 300000  # Adjust the number of timesteps as needed
 
 # Define PPO algorithm with hyperparameters
 ppo_model = PPO(
     "MlpPolicy", train_env, verbose=1,
-    learning_rate=5e-4,
-    n_steps=4096,
-    batch_size=64,
-    n_epochs=20,
-    ent_coef=0.01,
+    learning_rate=3e-4,  # Slightly lower learning rate for more stable learning
+    n_steps=8192,  # Increase the number of steps per update to see more of the episode before updating
+    batch_size=128,  # Larger batch size to provide more accurate gradient estimates
+    n_epochs=21,  # Increase epochs to improve stability
+    gamma=0.995,  # Higher gamma to focus on long-term rewards
+    ent_coef=0.005,  # Lower entropy coefficient to reduce exploration
     tensorboard_log="./tensorboard/"
 )
+
 
 # Define DQN algorithm with hyperparameters
 dqn_model = DQN(
     "MlpPolicy", train_env, verbose=1,
-    learning_rate=1e-4,
-    buffer_size=100000,
-    learning_starts=1000,
-    batch_size=64,
-    target_update_interval=500,
-    train_freq=7,
-    gamma=0.99,
-    exploration_fraction=0.1,
-    exploration_final_eps=0.02,
+    learning_rate=5e-5,  # Lower learning rate for more stable Q-value updates
+    buffer_size=200000,  # Larger buffer to store more experiences
+    learning_starts=2000,  # Wait longer before starting learning
+    batch_size=128,  # Larger batch size for better gradient estimation
+    target_update_interval=1000,  # Update the target network less frequently
+    train_freq=7,  # Train every 8 steps
+    gamma=0.995,  # Focus on long-term rewards
+    exploration_fraction=0.05,  # Reduce exploration faster
+    exploration_final_eps=0.01,  # Minimum exploration rate to exploit more
     tensorboard_log="./tensorboard/"
 )
+
 
 # Train PPO Model
 print("Training PPO Model...")
