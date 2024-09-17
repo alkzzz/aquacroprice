@@ -1,8 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import csv  # Import the CSV module
-# Uncomment the following line if using Comet.ml
-# from comet_ml import OfflineExperiment
+import csv
+from comet_ml import OfflineExperiment
 from stable_baselines3 import PPO, DQN
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from stable_baselines3.common.monitor import Monitor
@@ -84,13 +83,12 @@ def evaluate_agent(agent, env, n_eval_episodes=100, agent_name="Agent"):
         'std_irrigation': std_irrigation
     }
 
-# Initialize a new Comet.ml experiment for evaluation (optional)
-# Uncomment if using Comet.ml
-# experiment = OfflineExperiment(
-#     project_name="aqua-gym-rice-evaluation",
-#     workspace="alkzzz",
-#     offline_directory="/home/alkaff/phd/aquacroprice/comet_logs"
-# )
+# Initialize a new Comet.ml experiment for evaluation
+experiment = OfflineExperiment(
+    project_name="aqua-gym-rice-evaluation",
+    workspace="alkzzz",
+    offline_directory="/home/alkaff/phd/aquacroprice/comet_logs"
+)
 
 # List to store evaluation results
 evaluation_results = []
@@ -101,19 +99,36 @@ print("Evaluating PPO Model...")
 ppo_results = evaluate_agent(ppo_model, ppo_eval_env, n_eval_episodes=100, agent_name="PPO")
 evaluation_results.append(ppo_results)
 
+# Log PPO metrics to Comet.ml
+experiment.log_metric("PPO_mean_reward", ppo_results['mean_reward'])
+experiment.log_metric("PPO_std_reward", ppo_results['std_reward'])
+experiment.log_metric("PPO_mean_yield", ppo_results['mean_yield'])
+experiment.log_metric("PPO_std_yield", ppo_results['std_yield'])
+experiment.log_metric("PPO_mean_irrigation", ppo_results['mean_irrigation'])
+experiment.log_metric("PPO_std_irrigation", ppo_results['std_irrigation'])
+
 # Load and evaluate DQN Model
 dqn_model, dqn_eval_env = load_env_and_model("dqn_model", "dqn_vecnormalize.pkl")
 print("Evaluating DQN Model...")
 dqn_results = evaluate_agent(dqn_model, dqn_eval_env, n_eval_episodes=100, agent_name="DQN")
 evaluation_results.append(dqn_results)
 
+# Log DQN metrics to Comet.ml
+experiment.log_metric("DQN_mean_reward", dqn_results['mean_reward'])
+experiment.log_metric("DQN_std_reward", dqn_results['std_reward'])
+experiment.log_metric("DQN_mean_yield", dqn_results['mean_yield'])
+experiment.log_metric("DQN_std_yield", dqn_results['std_yield'])
+experiment.log_metric("DQN_mean_irrigation", dqn_results['mean_irrigation'])
+experiment.log_metric("DQN_std_irrigation", dqn_results['std_irrigation'])
+
 # Evaluate the Random Agent
 print("Evaluating Random Agent...")
 # For random agent, we can use the unnormalized environment
-def make_random_env():
-    return DummyVecEnv([lambda: Monitor(Maize(mode='train', year1=1982, year2=2002))])
+def make_eval_env():
+    return DummyVecEnv([lambda: Monitor(Maize(mode='train', year1=2003, year2=2018))])
 
-random_env = make_random_env()
+eval_env = make_eval_env()
+
 class RandomAgent:
     def __init__(self, action_space):
         self.action_space = action_space
@@ -122,23 +137,17 @@ class RandomAgent:
         action = self.action_space.sample()
         return [action], state
 
-random_agent = RandomAgent(random_env.action_space)
-random_results = evaluate_agent(random_agent, random_env, n_eval_episodes=100, agent_name="RandomAgent")
+random_agent = RandomAgent(eval_env.action_space)
+random_results = evaluate_agent(random_agent, eval_env, n_eval_episodes=100, agent_name="RandomAgent")
 evaluation_results.append(random_results)
 
-# Log the evaluation metrics to Comet.ml (if using)
-# Uncomment if using Comet.ml
-# for result in evaluation_results:
-#     agent_name = result['agent_name']
-#     experiment.log_metric(f"{agent_name}_final_mean_reward", result['mean_reward'])
-#     experiment.log_metric(f"{agent_name}_final_std_reward", result['std_reward'])
-#     experiment.log_metric(f"{agent_name}_final_mean_yield", result['mean_yield'])
-#     experiment.log_metric(f"{agent_name}_final_std_yield", result['std_yield'])
-#     experiment.log_metric(f"{agent_name}_final_mean_irrigation", result['mean_irrigation'])
-#     experiment.log_metric(f"{agent_name}_final_std_irrigation", result['std_irrigation'])
-
-# End the evaluation Comet.ml experiment (if using)
-# experiment.end()
+# Log Random Agent metrics to Comet.ml
+experiment.log_metric("RandomAgent_mean_reward", random_results['mean_reward'])
+experiment.log_metric("RandomAgent_std_reward", random_results['std_reward'])
+experiment.log_metric("RandomAgent_mean_yield", random_results['mean_yield'])
+experiment.log_metric("RandomAgent_std_yield", random_results['std_yield'])
+experiment.log_metric("RandomAgent_mean_irrigation", random_results['mean_irrigation'])
+experiment.log_metric("RandomAgent_std_irrigation", random_results['std_irrigation'])
 
 # Save evaluation results to a CSV file
 csv_filename = 'evaluation_results.csv'
@@ -153,6 +162,9 @@ try:
     print(f"Evaluation results saved to {csv_filename}")
 except IOError:
     print("I/O error while writing evaluation results to CSV")
+
+# End the evaluation Comet.ml experiment
+experiment.end()
 
 # Plot comparison of Mean Rewards
 plt.figure(figsize=(12, 7))
