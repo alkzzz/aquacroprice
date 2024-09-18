@@ -17,7 +17,7 @@ print("Starting evaluation phase...")
 
 # Function to create the evaluation environment
 def make_eval_env():
-    eval_env = DummyVecEnv([lambda: Monitor(Maize(mode='train', year1=1982, year2=2002))])
+    eval_env = DummyVecEnv([lambda: Monitor(Maize(mode='train', year1=2003, year2=2018))])
     return eval_env
 
 # Load the saved normalization statistics and set training=False
@@ -51,7 +51,7 @@ def evaluate_agent(agent, env, n_eval_episodes=100, agent_name="Agent"):
         total_irrigation = 0
 
         while not done:
-            action, _states = agent.predict(obs)
+            action, _states = agent.predict(obs, deterministic=True)
             obs, reward, done, info = env.step(action)
             episode_rewards.append(reward)
             total_irrigation += info[0].get('total_irrigation', 0)
@@ -124,10 +124,10 @@ experiment.log_metric("DQN_std_irrigation", dqn_results['std_irrigation'])
 # Evaluate the Random Agent
 print("Evaluating Random Agent...")
 # For random agent, we can use the unnormalized environment
-def make_eval_env():
+def make_random_env():
     return DummyVecEnv([lambda: Monitor(Maize(mode='train', year1=2003, year2=2018))])
 
-eval_env = make_eval_env()
+random_env = make_random_env()
 
 class RandomAgent:
     def __init__(self, action_space):
@@ -137,8 +137,8 @@ class RandomAgent:
         action = self.action_space.sample()
         return [action], state
 
-random_agent = RandomAgent(eval_env.action_space)
-random_results = evaluate_agent(random_agent, eval_env, n_eval_episodes=100, agent_name="RandomAgent")
+random_agent = RandomAgent(random_env.action_space)
+random_results = evaluate_agent(random_agent, random_env, n_eval_episodes=100, agent_name="RandomAgent")
 evaluation_results.append(random_results)
 
 # Log Random Agent metrics to Comet.ml

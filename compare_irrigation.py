@@ -8,14 +8,14 @@ import seaborn as sns
 
 
 
-path = get_filepath('hyderabad_climate.txt')
+path = get_filepath('champion_climate.txt')
 wdf = prepare_weather(path)
 wdf
 
 
 
-sim_start = '2008/08/01'
-sim_end = '2010/12/31'
+sim_start = '2003/05/01'
+sim_end = '2018/12/31'
 
 
 
@@ -126,14 +126,11 @@ for date in all_days:
             new_month=False
 
 
-
 depths = [25]*len(dates) # depth of irrigation applied
 schedule=pd.DataFrame([dates,depths]).T # create pandas DataFrame
 schedule.columns=['Date','Depth'] # name columns
 
-schedule
-
-
+print(schedule)
 
 irrigate_schedule = IrrigationManagement(irrigation_method=3,schedule=schedule)
 

@@ -81,7 +81,6 @@ ppo_model = PPO(
     tensorboard_log="./tensorboard/"
 )
 
-
 # Define DQN algorithm with hyperparameters
 dqn_model = DQN(
     "MlpPolicy", train_env, verbose=1,
