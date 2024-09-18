@@ -48,7 +48,7 @@ class Maize(gym.Env):
         # Define observation space: Includes weather-related observations
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(26,), dtype=np.float32)
 
-        self.action_depths = [0, 25]
+        self.action_depths = [0, 15, 30]
         self.action_space = spaces.Discrete(len(self.action_depths))  # Discrete action space
 
         # Open a log file for debugging output
