@@ -8,6 +8,8 @@ from stable_baselines3.common.monitor import Monitor
 from aquacroprice.envs.maize import Maize
 import warnings
 import logging
+import random
+import torch
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(level=logging.WARNING)
@@ -15,15 +17,28 @@ logging.basicConfig(level=logging.WARNING)
 ### Evaluation Phase ###
 print("Starting evaluation phase...")
 
+# Function to set seed for reproducibility
+def set_seed(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+
 # Function to create the evaluation environment
-def make_eval_env():
-    eval_env = DummyVecEnv([lambda: Monitor(Maize(mode='train', year1=2003, year2=2018))])
+def make_eval_env(seed):
+    def _init():
+        env = Monitor(Maize(mode='train', year1=2003, year2=2018))
+        # Instead of env.seed(seed), we will seed the random number generators manually
+        set_seed(seed)
+        return env
+    eval_env = DummyVecEnv([_init])
     return eval_env
 
-# Load the saved normalization statistics and set training=False
-def load_env_and_model(model_name, vecnormalize_filename):
+# Load the saved normalization statistics and set training=False, with fixed seed
+def load_env_and_model(model_name, vecnormalize_filename, seed):
+    # Set seed
+    set_seed(seed)
     # Create a new evaluation environment
-    eval_env = make_eval_env()
+    eval_env = make_eval_env(seed)
     # Load the saved VecNormalize statistics
     eval_env = VecNormalize.load(vecnormalize_filename, eval_env)
     # Do not update them at test time
@@ -93,41 +108,47 @@ experiment = OfflineExperiment(
 # List to store evaluation results
 evaluation_results = []
 
-# Load and evaluate PPO Model
-ppo_model, ppo_eval_env = load_env_and_model("ppo_model", "ppo_vecnormalize.pkl")
-print("Evaluating PPO Model...")
-ppo_results = evaluate_agent(ppo_model, ppo_eval_env, n_eval_episodes=100, agent_name="PPO")
-evaluation_results.append(ppo_results)
+# Set the seed values
+seeds = [1, 2, 3, 4, 5]
 
-# Log PPO metrics to Comet.ml
-experiment.log_metric("PPO_mean_reward", ppo_results['mean_reward'])
-experiment.log_metric("PPO_std_reward", ppo_results['std_reward'])
-experiment.log_metric("PPO_mean_yield", ppo_results['mean_yield'])
-experiment.log_metric("PPO_std_yield", ppo_results['std_yield'])
-experiment.log_metric("PPO_mean_irrigation", ppo_results['mean_irrigation'])
-experiment.log_metric("PPO_std_irrigation", ppo_results['std_irrigation'])
+# Loop through different seeds and evaluate for PPO
+for seed in seeds:
+    print(f"Evaluating PPO Model with seed {seed}...")
+    ppo_model, ppo_eval_env = load_env_and_model("ppo_model", "ppo_vecnormalize.pkl", seed)
+    ppo_results = evaluate_agent(ppo_model, ppo_eval_env, n_eval_episodes=100, agent_name=f"PPO_seed_{seed}")
+    evaluation_results.append(ppo_results)
 
-# Load and evaluate DQN Model
-dqn_model, dqn_eval_env = load_env_and_model("dqn_model", "dqn_vecnormalize.pkl")
-print("Evaluating DQN Model...")
-dqn_results = evaluate_agent(dqn_model, dqn_eval_env, n_eval_episodes=100, agent_name="DQN")
-evaluation_results.append(dqn_results)
+    # Log PPO metrics to Comet.ml
+    experiment.log_metric(f"PPO_seed_{seed}_mean_reward", ppo_results['mean_reward'])
+    experiment.log_metric(f"PPO_seed_{seed}_std_reward", ppo_results['std_reward'])
+    experiment.log_metric(f"PPO_seed_{seed}_mean_yield", ppo_results['mean_yield'])
+    experiment.log_metric(f"PPO_seed_{seed}_std_yield", ppo_results['std_yield'])
+    experiment.log_metric(f"PPO_seed_{seed}_mean_irrigation", ppo_results['mean_irrigation'])
+    experiment.log_metric(f"PPO_seed_{seed}_std_irrigation", ppo_results['std_irrigation'])
 
-# Log DQN metrics to Comet.ml
-experiment.log_metric("DQN_mean_reward", dqn_results['mean_reward'])
-experiment.log_metric("DQN_std_reward", dqn_results['std_reward'])
-experiment.log_metric("DQN_mean_yield", dqn_results['mean_yield'])
-experiment.log_metric("DQN_std_yield", dqn_results['std_yield'])
-experiment.log_metric("DQN_mean_irrigation", dqn_results['mean_irrigation'])
-experiment.log_metric("DQN_std_irrigation", dqn_results['std_irrigation'])
+# Loop through different seeds and evaluate for DQN
+for seed in seeds:
+    print(f"Evaluating DQN Model with seed {seed}...")
+    dqn_model, dqn_eval_env = load_env_and_model("dqn_model", "dqn_vecnormalize.pkl", seed)
+    dqn_results = evaluate_agent(dqn_model, dqn_eval_env, n_eval_episodes=100, agent_name=f"DQN_seed_{seed}")
+    evaluation_results.append(dqn_results)
 
-# Evaluate the Random Agent
-print("Evaluating Random Agent...")
-# For random agent, we can use the unnormalized environment
-def make_random_env():
-    return DummyVecEnv([lambda: Monitor(Maize(mode='train', year1=2003, year2=2018))])
+    # Log DQN metrics to Comet.ml
+    experiment.log_metric(f"DQN_seed_{seed}_mean_reward", dqn_results['mean_reward'])
+    experiment.log_metric(f"DQN_seed_{seed}_std_reward", dqn_results['std_reward'])
+    experiment.log_metric(f"DQN_seed_{seed}_mean_yield", dqn_results['mean_yield'])
+    experiment.log_metric(f"DQN_seed_{seed}_std_yield", dqn_results['std_yield'])
+    experiment.log_metric(f"DQN_seed_{seed}_mean_irrigation", dqn_results['mean_irrigation'])
+    experiment.log_metric(f"DQN_seed_{seed}_std_irrigation", dqn_results['std_irrigation'])
 
-random_env = make_random_env()
+# Loop through different seeds and evaluate Random Agent
+def make_random_env(seed):
+    def _init():
+        env = Monitor(Maize(mode='train', year1=2003, year2=2018))
+        set_seed(seed)
+        return env
+    random_env = DummyVecEnv([_init])
+    return random_env
 
 class RandomAgent:
     def __init__(self, action_space):
@@ -137,17 +158,20 @@ class RandomAgent:
         action = self.action_space.sample()
         return [action], state
 
-random_agent = RandomAgent(random_env.action_space)
-random_results = evaluate_agent(random_agent, random_env, n_eval_episodes=100, agent_name="RandomAgent")
-evaluation_results.append(random_results)
+for seed in seeds:
+    print(f"Evaluating Random Agent with seed {seed}...")
+    random_env = make_random_env(seed)
+    random_agent = RandomAgent(random_env.action_space)
+    random_results = evaluate_agent(random_agent, random_env, n_eval_episodes=100, agent_name=f"RandomAgent_seed_{seed}")
+    evaluation_results.append(random_results)
 
-# Log Random Agent metrics to Comet.ml
-experiment.log_metric("RandomAgent_mean_reward", random_results['mean_reward'])
-experiment.log_metric("RandomAgent_std_reward", random_results['std_reward'])
-experiment.log_metric("RandomAgent_mean_yield", random_results['mean_yield'])
-experiment.log_metric("RandomAgent_std_yield", random_results['std_yield'])
-experiment.log_metric("RandomAgent_mean_irrigation", random_results['mean_irrigation'])
-experiment.log_metric("RandomAgent_std_irrigation", random_results['std_irrigation'])
+    # Log Random Agent metrics to Comet.ml
+    experiment.log_metric(f"RandomAgent_seed_{seed}_mean_reward", random_results['mean_reward'])
+    experiment.log_metric(f"RandomAgent_seed_{seed}_std_reward", random_results['std_reward'])
+    experiment.log_metric(f"RandomAgent_seed_{seed}_mean_yield", random_results['mean_yield'])
+    experiment.log_metric(f"RandomAgent_seed_{seed}_std_yield", random_results['std_yield'])
+    experiment.log_metric(f"RandomAgent_seed_{seed}_mean_irrigation", random_results['mean_irrigation'])
+    experiment.log_metric(f"RandomAgent_seed_{seed}_std_irrigation", random_results['std_irrigation'])
 
 # Save evaluation results to a CSV file
 csv_filename = 'evaluation_results.csv'
