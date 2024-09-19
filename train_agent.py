@@ -67,7 +67,7 @@ train_env = VecNormalize(train_env, norm_obs=True, norm_reward=True)
 reward_logging_callback = RewardLoggingCallback(experiment)
 
 # Training parameters
-train_timesteps = 300000  # Adjust the number of timesteps as needed
+train_timesteps = 1000000  # Adjust the number of timesteps as needed
 
 # Define PPO algorithm with hyperparameters
 ppo_model = PPO(
