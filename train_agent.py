@@ -60,7 +60,7 @@ experiment = OfflineExperiment(
 
 ### Training Phase ###
 # Create the environment for training
-train_env = DummyVecEnv([lambda: Monitor(Maize(mode='train', year1=1982, year2=2002))])
+train_env = DummyVecEnv([lambda: Monitor(Maize(mode='train', year1=1982, year2=2007))])
 train_env = VecNormalize(train_env, norm_obs=True, norm_reward=True)
 
 # Custom reward logging callback

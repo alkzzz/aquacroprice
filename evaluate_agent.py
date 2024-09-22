@@ -26,7 +26,7 @@ def set_seed(seed):
 # Function to create the evaluation environment
 def make_eval_env(seed):
     def _init():
-        env = Monitor(Maize(mode='train', year1=2003, year2=2018))
+        env = Monitor(Maize(mode='train', year1=2008, year2=2018))
         # Instead of env.seed(seed), we will seed the random number generators manually
         set_seed(seed)
         return env

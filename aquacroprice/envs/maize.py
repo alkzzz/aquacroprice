@@ -69,17 +69,6 @@ class Maize(gym.Env):
         sim_year = np.random.randint(self.year1, self.year2 + 1)
         self.simcalyear = sim_year
         print(f"Chosen Year: {self.simcalyear}")
-        
-        # Random planting date between '01/01' and '08/01'
-        start_of_year = datetime(self.simcalyear, 1, 1)
-        start_of_august = datetime(self.simcalyear, 8, 1)
-
-        # Select a random date between January 1st and August 1st
-        random_start_date = start_of_year + timedelta(days=np.random.randint(0, (start_of_august - start_of_year).days + 1))
-
-        # Format the random start date to 'MM/DD' format
-        self.planting_date = random_start_date.strftime('%m/%d')
-        print(f"Random Crop Planting Date: {self.planting_date}")
 
         crop = config['crop']
         self.planting_date = '05/01'
